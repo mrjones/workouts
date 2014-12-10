@@ -19,20 +19,30 @@ main = do
 allPages :: ServerPartT IO Response
 allPages = msum
            [ mkTablePage
+           , dropTablePage
+           , insertFakeDataPage
            , helloPage
            ]
 
 mkTablePage :: ServerPartT IO Response
 mkTablePage = dir "admin" $ dir "mktable" $ do
   i <- liftIO mkTable
-  ok (toResponse (mkTableHtml i))
+  ok (toResponse (executeSqlHtml "create table"i))
 
-mkTableHtml :: Int64 -> H.Html
-mkTableHtml _ =
-  H.html $ do
-    H.head $ do
-      H.title $ "mktable page"
-    H.body "mktable"
+dropTablePage :: ServerPartT IO Response
+dropTablePage = dir "admin" $ dir "droptable" $ do
+  i <- liftIO dropTable
+  ok (toResponse (executeSqlHtml "drop table" i))
+
+insertFakeDataPage :: ServerPartT IO Response
+insertFakeDataPage = dir "fakedata" $ do
+  _ <- liftIO insertFakeData
+  ok $ toResponse (simpleMessageHtml "yay")
+
+insertFakeData :: IO Int64
+insertFakeData = do
+  conn <- dbConnect
+  execute conn "INSERT INTO happstack.runs (date, miles, duration_sec, incline, comment) VALUES ('2014-12-9', 3.0, 1200, 1.0, 'First post!')" ()
 
 helloPage :: ServerPartT IO Response
 helloPage = do
@@ -40,15 +50,8 @@ helloPage = do
     helloPage2 message
 
 helloPage2 :: String -> ServerPartT IO Response
-helloPage2 msg = ok (toResponse (pageWithMessage msg))
+helloPage2 msg = ok (toResponse (simpleMessageHtml msg))
 
-pageWithMessage :: String -> H.Html
-pageWithMessage msg =
-  H.html $ do
-    H.head $ do
-      H.title $ "Hello, world!"
-    H.body $ do
-      H.toHtml msg
 
 liftIoMyHead :: ServerPartT IO String
 liftIoMyHead = liftIO $ myHead getMessage
@@ -67,9 +70,43 @@ getMessage = do
   conn <- dbConnect
   results <- query conn "SELECT Message FROM foo" ()
   return $ Prelude.map(\(Only r) -> r) results
-                                                        
+
+--
+-- Database Admin
+--
+
+dropTable :: IO Int64
+dropTable = do
+  conn <- dbConnect
+  execute conn "DROP TABLE happstack.runs" ()
 
 mkTable :: IO Int64
 mkTable = do
   conn <- dbConnect
-  execute conn "CREATE TABLE happstack.runs (millimiles INT, duration_sec INT, comment VARCHAR(255))" ()
+  execute conn "CREATE TABLE happstack.runs (\
+               \ id INT NOT NULL AUTO_INCREMENT,\
+               \ date DATE,\
+               \ miles DECIMAL(5,2),\
+               \ duration_sec INT,\
+               \ incline DECIMAL(2,1),\
+               \ comment VARCHAR(255),\
+               \ PRIMARY KEY (id))" ()
+--
+-- HTML Templates
+--
+  
+executeSqlHtml :: String -> Int64 -> H.Html
+executeSqlHtml opname _ =
+  H.html $ do
+    H.head $ do
+      H.title $ "executed database op"
+    H.body $ H.toHtml opname
+
+simpleMessageHtml :: String -> H.Html
+simpleMessageHtml msg =
+  H.html $ do
+    H.head $ do
+      H.title $ "Hello, world!"
+    H.body $ do
+      H.toHtml msg
+
