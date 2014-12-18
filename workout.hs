@@ -69,8 +69,26 @@ dataTableHtml rs =
     H.head $ do
       H.title $ "Data"
     H.body $ do
-      ul $ forM_ rs (\r -> li (toHtml (show r)))
-      
+      H.table $ do
+        dataTableHeader
+        mapM_ dataTableRow rs
+
+dataTableHeader :: H.Html
+dataTableHeader =
+  H.thead $ H.tr $ do
+    H.td "Date"
+    H.td "Dist"
+    H.td "Time"
+    H.td "Incline"
+    H.td "Note"
+
+dataTableRow :: Run -> H.Html
+dataTableRow r = H.tr $ do
+  H.td $ toHtml $ show $ date r
+  H.td $ toHtml $ show $ distance r
+  H.td $ toHtml $ show $ duration r
+  H.td $ toHtml $ show $ incline r
+  H.td $ toHtml $ comment r
 
 --  foldr (\r a -> a ++ (show r)) ""
 
