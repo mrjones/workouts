@@ -6,6 +6,8 @@ import Data.Int (Int64)
 -- sudo apt-get install libmysqlclient-dev
 -- cabal install mysql-simple
 import Database.MySQL.Simple
+import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
+import Database.MySQL.Simple.Result (convert)
 import Database.MySQL.Simple.Types as SQLT
 -- cabal install happstack
 import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, ServerPart, Response, ServerPartT)
@@ -21,6 +23,7 @@ allPages = msum
            [ mkTablePage
            , dropTablePage
            , insertFakeDataPage
+           , dumpDataPage
            , helloPage
            ]
 
@@ -35,13 +38,29 @@ dropTablePage = dir "admin" $ dir "droptable" $ do
   ok (toResponse (executeSqlHtml "drop table" i))
 
 insertFakeDataPage :: ServerPartT IO Response
---insertFakeDataPage = ok $ toResponse $ simpleMessageHtml "hi"
---insertFakeDataPage = dir "fakedata" $ do
 insertFakeDataPage = dir "fakedata" $ do
   conn <- liftIO dbConnect
   n <- liftIO (execins conn)
   ok (toResponse (fakeDataHtml n))
 
+dumpDataPage :: ServerPartT IO Response
+dumpDataPage = dir "dump" $ do
+  conn <- liftIO dbConnect
+  runs <- liftIO $ query conn "SELECT comment FROM happstack.runs" ()
+  ok (toResponse (simpleMessageHtml (resultsToString runs)))
+
+---------
+
+data Run = Run { comment :: String }
+
+instance QueryResults Run where
+  convertResults [fa] [va] = Run (convert fa va)
+
+resultsToString :: [ Run ] -> String
+resultsToString = foldr (\r a -> a ++ (comment r)) ""
+
+---------
+  
 fakeDataHtml :: Int64 -> H.Html
 fakeDataHtml n = simpleMessageHtml (show n)
 
