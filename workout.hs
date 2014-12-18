@@ -3,6 +3,7 @@
 import Control.Monad (liftM, msum)
 import Control.Monad.IO.Class (liftIO)
 import Data.Int (Int64)
+import Data.Time.Calendar (Day)
 -- sudo apt-get install libmysqlclient-dev
 -- cabal install mysql-simple
 import Database.MySQL.Simple
@@ -46,18 +47,22 @@ insertFakeDataPage = dir "fakedata" $ do
 dumpDataPage :: ServerPartT IO Response
 dumpDataPage = dir "dump" $ do
   conn <- liftIO dbConnect
-  runs <- liftIO $ query conn "SELECT comment FROM happstack.runs" ()
+  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, comment FROM happstack.runs" ()
   ok (toResponse (simpleMessageHtml (resultsToString runs)))
 
 ---------
 
-data Run = Run { comment :: String }
+data Run = Run { distance :: Float
+               , duration :: Int
+               , date :: Day
+               , comment :: String
+               } deriving (Show)
 
 instance QueryResults Run where
-  convertResults [fa] [va] = Run (convert fa va)
+  convertResults [f_dist,f_dur,f_date,f_comm] [v_dist,v_dur,v_date,v_comm] = Run (convert f_dist v_dist) (convert f_dur v_dur) (convert f_date v_date) (convert f_comm v_comm)
 
 resultsToString :: [ Run ] -> String
-resultsToString = foldr (\r a -> a ++ (comment r)) ""
+resultsToString = foldr (\r a -> a ++ (show r)) ""
 
 ---------
   
