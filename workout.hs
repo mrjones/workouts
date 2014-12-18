@@ -41,24 +41,12 @@ insertFakeDataPage = dir "fakedata" $ do
   conn <- liftIO dbConnect
   n <- liftIO (execins conn)
   ok (toResponse (fakeDataHtml n))
-  
-  
-
-
---f0 :: IO Response -> ServerPartT IO Response
---f0 = liftIO
-
---f1 :: Connection -> IO H.Html
---f1 conn = (>>=) (execins conn) f2
 
 fakeDataHtml :: Int64 -> H.Html
 fakeDataHtml n = simpleMessageHtml (show n)
 
 execins :: Connection -> IO Int64
 execins conn = execute conn "INSERT INTO happstack.runs (date, miles, duration_sec, incline, comment) VALUES ('2014-12-9', 3.0, 1200, 1.0, 'First post!')" ()
-
---insertFakeData :: IO Int64
---insertFakeData = do
 
 helloPage :: ServerPartT IO Response
 helloPage = do
