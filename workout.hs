@@ -9,11 +9,10 @@ import Data.Time.Calendar (Day)
 import Database.MySQL.Simple
 import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
-import Database.MySQL.Simple.Types as SQLT
 -- cabal install happstack
 import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, ServerPart, Response, ServerPartT)
 import Text.Blaze.Html5 as H
---import Text.Blaze.Html5.Attributes as A
+
 
 main:: IO()
 main = do
@@ -47,7 +46,7 @@ insertFakeDataPage = dir "fakedata" $ do
 dumpDataPage :: ServerPartT IO Response
 dumpDataPage = dir "dump" $ do
   conn <- liftIO dbConnect
-  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, comment FROM happstack.runs" ()
+  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment FROM happstack.runs" ()
   ok (toResponse (dataTableHtml runs))
 
 ---------
@@ -55,11 +54,12 @@ dumpDataPage = dir "dump" $ do
 data Run = Run { distance :: Float
                , duration :: Int
                , date :: Day
+               , incline :: Float
                , comment :: String
                } deriving (Show)
 
 instance QueryResults Run where
-  convertResults [f_dist,f_dur,f_date,f_comm] [v_dist,v_dur,v_date,v_comm] = Run (convert f_dist v_dist) (convert f_dur v_dur) (convert f_date v_date) (convert f_comm v_comm)
+  convertResults [f_dist,f_dur,f_date,f_incl,f_comm] [v_dist,v_dur,v_date,v_incl,v_comm] = Run (convert f_dist v_dist) (convert f_dur v_dur) (convert f_date v_date) (convert f_incl v_incl) (convert f_comm v_comm)
 
 ---------
   
