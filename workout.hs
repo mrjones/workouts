@@ -35,14 +35,30 @@ dropTablePage = dir "admin" $ dir "droptable" $ do
   ok (toResponse (executeSqlHtml "drop table" i))
 
 insertFakeDataPage :: ServerPartT IO Response
+--insertFakeDataPage = ok $ toResponse $ simpleMessageHtml "hi"
+--insertFakeDataPage = dir "fakedata" $ do
 insertFakeDataPage = dir "fakedata" $ do
-  _ <- liftIO insertFakeData
-  ok $ toResponse (simpleMessageHtml "yay")
+  conn <- liftIO dbConnect
+  n <- liftIO (execins conn)
+  ok (toResponse (fakeDataHtml n))
+  
+  
 
-insertFakeData :: IO Int64
-insertFakeData = do
-  conn <- dbConnect
-  execute conn "INSERT INTO happstack.runs (date, miles, duration_sec, incline, comment) VALUES ('2014-12-9', 3.0, 1200, 1.0, 'First post!')" ()
+
+--f0 :: IO Response -> ServerPartT IO Response
+--f0 = liftIO
+
+--f1 :: Connection -> IO H.Html
+--f1 conn = (>>=) (execins conn) f2
+
+fakeDataHtml :: Int64 -> H.Html
+fakeDataHtml n = simpleMessageHtml (show n)
+
+execins :: Connection -> IO Int64
+execins conn = execute conn "INSERT INTO happstack.runs (date, miles, duration_sec, incline, comment) VALUES ('2014-12-9', 3.0, 1200, 1.0, 'First post!')" ()
+
+--insertFakeData :: IO Int64
+--insertFakeData = do
 
 helloPage :: ServerPartT IO Response
 helloPage = do
@@ -59,6 +75,7 @@ liftIoMyHead = liftIO $ myHead getMessage
 myHead :: IO [String] -> IO String
 myHead xs = liftM Prelude.head xs
 
+dbConnect :: IO Connection
 dbConnect = connect defaultConnectInfo
     { connectUser = "happstack"
     , connectPassword = "happstack"
