@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-import Control.Monad (liftM, msum)
+import Control.Monad (liftM, msum, forM_)
 import Control.Monad.IO.Class (liftIO)
 import Data.Int (Int64)
 import Data.Time.Calendar (Day)
@@ -48,7 +48,7 @@ dumpDataPage :: ServerPartT IO Response
 dumpDataPage = dir "dump" $ do
   conn <- liftIO dbConnect
   runs <- liftIO $ query conn "SELECT miles, duration_sec, date, comment FROM happstack.runs" ()
-  ok (toResponse (simpleMessageHtml (resultsToString runs)))
+  ok (toResponse (dataTableHtml runs))
 
 ---------
 
@@ -61,11 +61,19 @@ data Run = Run { distance :: Float
 instance QueryResults Run where
   convertResults [f_dist,f_dur,f_date,f_comm] [v_dist,v_dur,v_date,v_comm] = Run (convert f_dist v_dist) (convert f_dur v_dur) (convert f_date v_date) (convert f_comm v_comm)
 
-resultsToString :: [ Run ] -> String
-resultsToString = foldr (\r a -> a ++ (show r)) ""
-
 ---------
   
+dataTableHtml :: [ Run ] -> H.Html
+dataTableHtml rs =
+  H.html $ do
+    H.head $ do
+      H.title $ "Data"
+    H.body $ do
+      ul $ forM_ rs (\r -> li (toHtml (show r)))
+      
+
+--  foldr (\r a -> a ++ (show r)) ""
+
 fakeDataHtml :: Int64 -> H.Html
 fakeDataHtml n = simpleMessageHtml (show n)
 
