@@ -60,8 +60,9 @@ newRunFormPage = dir "newrun" $ do
 
 handleNewRunPage :: ServerPartT IO Response
 handleNewRunPage = dir "handlenewrun" $ do
-  a <- body $ look "distance"
-  ok $ toResponse $ simpleMessageHtml a
+  distance <- body $ look "distance"
+  time <- body $ look "time"
+  ok $ toResponse $ simpleMessageHtml (printf "%s in %s" distance time)
 
 ---------
 
