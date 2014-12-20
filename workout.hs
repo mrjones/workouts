@@ -10,8 +10,10 @@ import Database.MySQL.Simple
 import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
 -- cabal install happstack
-import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, ServerPart, Response, ServerPartT)
+import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, ServerPart, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy)
+import Text.Blaze.Html5 ((!))
 import qualified Text.Blaze.Html5 as H
+import qualified Text.Blaze.Html5.Attributes as A
 import Text.Printf (printf)
 
 
@@ -20,13 +22,15 @@ main = do
   simpleHTTP nullConf $ allPages
 
 allPages :: ServerPartT IO Response
-allPages = msum
-           [ mkTablePage
-           , dropTablePage
-           , insertFakeDataPage
-           , dumpDataPage
-           , helloPage
-           ]
+allPages = do
+  decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
+  msum [ mkTablePage
+       , dropTablePage
+       , insertFakeDataPage
+       , dumpDataPage
+       , newRunFormPage
+       , handleNewRunPage
+       ]
 
 mkTablePage :: ServerPartT IO Response
 mkTablePage = dir "admin" $ dir "mktable" $ do
@@ -50,6 +54,15 @@ dumpDataPage = dir "dump" $ do
   runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment FROM happstack.runs" ()
   ok (toResponse (dataTableHtml runs))
 
+newRunFormPage :: ServerPartT IO Response
+newRunFormPage = dir "newrun" $ do
+  ok $ toResponse $ newRunFormHtml
+
+handleNewRunPage :: ServerPartT IO Response
+handleNewRunPage = dir "handlenewrun" $ do
+  a <- body $ look "distance"
+  ok $ toResponse $ simpleMessageHtml a
+
 ---------
 
 data Run = Run { distance :: Float
@@ -64,7 +77,21 @@ instance QueryResults Run where
     Run (convert f_dist v_dist) (convert f_dur v_dur) (convert f_date v_date) (convert f_incl v_incl) (convert f_comm v_comm)
 
 ---------
-  
+
+newRunFormHtml :: H.Html
+newRunFormHtml =
+  H.html $ do
+    H.head $ do
+      H.title "New Run"
+    H.body $ do
+      H.form ! A.method "post" ! A.action "/handlenewrun" $ do
+        H.label ! A.for "distance" $ H.toHtml ("distance" ::String)
+        H.input ! A.type_ "text" ! A.id "distance" ! A.name "distance"
+        H.label ! A.for "time" $ H.toHtml ("time" ::String)
+        H.input ! A.type_ "text" ! A.id "time" ! A.name "time"
+        H.input ! A.type_ "submit"
+
+
 dataTableHtml :: [ Run ] -> H.Html
 dataTableHtml rs =
   H.html $ do
@@ -111,13 +138,13 @@ fakeDataHtml n = simpleMessageHtml (show n)
 execins :: Connection -> IO Int64
 execins conn = execute conn "INSERT INTO happstack.runs (date, miles, duration_sec, incline, comment) VALUES ('2014-12-9', 3.0, 1200, 1.0, 'First post!')" ()
 
-helloPage :: ServerPartT IO Response
-helloPage = do
-    message <- liftIoMyHead
-    helloPage2 message
+--helloPage :: ServerPartT IO Response
+--helloPage = do
+--    message <- liftIoMyHead
+--    helloPage2 message
 
-helloPage2 :: String -> ServerPartT IO Response
-helloPage2 msg = ok (toResponse (simpleMessageHtml msg))
+--helloPage2 :: String -> ServerPartT IO Response
+--helloPage2 msg = ok (toResponse (simpleMessageHtml msg))
 
 
 liftIoMyHead :: ServerPartT IO String
