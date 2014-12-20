@@ -4,7 +4,8 @@ import Control.Monad (liftM, msum, forM_)
 import Control.Monad.IO.Class (liftIO)
 import Data.Int (Int64)
 import Data.Monoid (mconcat)
-import Data.Time.Calendar (Day, fromGregorian)
+import Data.Text (splitOn, pack, unpack)
+import Data.Time.Calendar (Day, fromGregorianValid)
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Time.Format (formatTime)
 import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, TimeZone)
@@ -21,6 +22,7 @@ import Text.Blaze.Html5 ((!))
 import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
 import Text.Printf (printf)
+import Text.Read (readMaybe)
 
 
 main:: IO()
@@ -75,11 +77,46 @@ handleNewRunPage = dir "handlenewrun" $ do
   incline <- body $ look "incline"
   comment <- body $ look "comment"
   run <- return $ (parseRun distance time date incline comment)
+  conn <- liftIO dbConnect
+  n <- liftIO $ storeRun conn run
   ok $ toResponse $ simpleMessageHtml (show run)
 
 parseRun :: String -> String -> String -> String -> String -> Maybe Run
-parseRun distanceS durationS dateS inclineS commentS =
-  Just (Run 3.0 1200 (fromGregorian 2014 12 20) 1.0 "FAKE")
+parseRun distanceS durationS dateS inclineS commentS = do
+  distance <- readMaybe distanceS :: Maybe Float
+  incline <- readMaybe inclineS :: Maybe Float
+  duration <- parseDuration durationS
+  date <- parseDate dateS
+  Just (Run distance duration date incline commentS)
+
+parseDuration :: String -> Maybe Int
+parseDuration input = do
+  parts <- Just (splitOn (pack ":") (pack input))
+  case parts of
+    [minS,secS] -> do
+      min <- readMaybe (unpack minS) :: Maybe Int
+      sec <- readMaybe (unpack secS) :: Maybe Int
+      Just (min * 60 + sec)
+      Just 1200
+    _ -> Nothing
+
+parseDate :: String -> Maybe Day
+parseDate input = do
+  parts <- Just (splitOn (pack "-") (pack input))
+  case parts of
+    [yearS,monthS,dayS] -> do
+      year <- readMaybe (unpack yearS) :: Maybe Integer
+      month <- readMaybe (unpack monthS) :: Maybe Int
+      day <- readMaybe (unpack dayS) :: Maybe Int
+      fromGregorianValid year month day
+    _ -> Nothing
+
+storeRun :: Connection -> Maybe Run -> IO Int64
+storeRun conn mr = case mr of
+  Just r -> execute conn "INSERT INTO happstack.runs (date, miles, duration_sec, incline, comment) VALUES (?, ?, ?, ?, ?)"
+            (date r, distance r, duration r, incline r, comment r)
+  Nothing -> return 0
+
 
 ---------
 
