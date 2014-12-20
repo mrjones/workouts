@@ -3,6 +3,7 @@
 import Control.Monad (liftM, msum, forM_)
 import Control.Monad.IO.Class (liftIO)
 import Data.Int (Int64)
+import Data.Monoid (mconcat)
 import Data.Time.Calendar (Day)
 -- sudo apt-get install libmysqlclient-dev
 -- cabal install mysql-simple
@@ -11,6 +12,7 @@ import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
 -- cabal install happstack
 import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, ServerPart, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy)
+import Text.Blaze (toValue)
 import Text.Blaze.Html5 ((!))
 import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
@@ -86,12 +88,24 @@ newRunFormHtml =
       H.title "New Run"
     H.body $ do
       H.form ! A.method "post" ! A.action "/handlenewrun" $ do
-        H.label ! A.for "distance" $ H.toHtml ("distance" ::String)
-        H.input ! A.type_ "text" ! A.id "distance" ! A.name "distance"
-        H.label ! A.for "time" $ H.toHtml ("time" ::String)
-        H.input ! A.type_ "text" ! A.id "time" ! A.name "time"
+        H.table $ do
+          mconcat (map (uncurry newRunFormRow)                   
+                   [ ("distance", "text")
+                   , ("time", "text")
+                   , ("incline", "text")
+                   , ("date", "date")
+                   ])
         H.input ! A.type_ "submit"
 
+newRunFormRow :: String -> String -> H.Html
+newRunFormRow name formType =
+  H.tr $ do
+    H.td $
+      H.label ! A.for (toValue name) $ H.toHtml name
+    H.td $
+      H.input ! A.type_ (toValue formType)
+              ! A.id (toValue name)
+              ! A.name (toValue name)
 
 dataTableHtml :: [ Run ] -> H.Html
 dataTableHtml rs =
