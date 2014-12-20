@@ -64,8 +64,8 @@ newRunFormPage :: ServerPartT IO Response
 newRunFormPage = dir "newrun" $ do
   tz <- liftIO $ getCurrentTimeZone
   utcNow <- liftIO $ getCurrentTime
-  now <- return $ utcToLocalTime tz utcNow
-  ok $ toResponse $ newRunFormHtml now
+  localNow <- return $ utcToLocalTime tz utcNow
+  ok $ toResponse $ newRunFormHtml localNow
 
 handleNewRunPage :: ServerPartT IO Response
 handleNewRunPage = dir "handlenewrun" $ do
