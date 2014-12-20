@@ -1,21 +1,22 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-import Control.Monad (liftM, msum, forM_)
+-- sudo apt-get install libmysqlclient-dev
+-- cabal install mysql-simple
+-- cabal install happstack
+
+import Control.Monad (msum)
 import Control.Monad.IO.Class (liftIO)
 import Data.Int (Int64)
 import Data.Monoid (mconcat)
 import Data.Text (splitOn, pack, unpack)
 import Data.Time.Calendar (Day, fromGregorianValid)
-import Data.Time.Clock (UTCTime, getCurrentTime)
+import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (formatTime)
-import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, TimeZone)
--- sudo apt-get install libmysqlclient-dev
--- cabal install mysql-simple
+import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone)
 import Database.MySQL.Simple
 import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
--- cabal install happstack
-import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, ServerPart, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy)
+import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy)
 import System.Locale (defaultTimeLocale)
 import Text.Blaze (toValue)
 import Text.Blaze.Html5 ((!))
@@ -71,14 +72,14 @@ newRunFormPage = dir "newrun" $ do
 
 handleNewRunPage :: ServerPartT IO Response
 handleNewRunPage = dir "handlenewrun" $ do
-  distance <- body $ look "distance"
-  time <- body $ look "time"
-  date <- body $ look "date"
-  incline <- body $ look "incline"
-  comment <- body $ look "comment"
-  run <- return $ (parseRun distance time date incline comment)
+  distanceS <- body $ look "distance"
+  timeS <- body $ look "time"
+  dateS <- body $ look "date"
+  inclineS <- body $ look "incline"
+  commentS <- body $ look "comment"
+  run <- return $ (parseRun distanceS timeS dateS inclineS commentS)
   conn <- liftIO dbConnect
-  n <- liftIO $ storeRun conn run
+  _ <- liftIO $ storeRun conn run
   ok $ toResponse $ simpleMessageHtml (show run)
 
 parseRun :: String -> String -> String -> String -> String -> Maybe Run
@@ -223,24 +224,12 @@ execins conn = execute conn "INSERT INTO happstack.runs (date, miles, duration_s
 --helloPage2 msg = ok (toResponse (simpleMessageHtml msg))
 
 
-liftIoMyHead :: ServerPartT IO String
-liftIoMyHead = liftIO $ myHead getMessage
-
-myHead :: IO [String] -> IO String
-myHead xs = liftM head xs
-
 dbConnect :: IO Connection
 dbConnect = connect defaultConnectInfo
     { connectUser = "happstack"
     , connectPassword = "happstack"
     , connectDatabase = "happstack"
     }
-
-getMessage :: IO [String]
-getMessage = do
-  conn <- dbConnect
-  results <- query conn "SELECT Message FROM foo" ()
-  return $ map(\(Only r) -> r) results
 
 --
 -- Database Admin
