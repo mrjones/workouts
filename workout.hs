@@ -62,9 +62,9 @@ dumpDataPage = dir "dump" $ do
 
 newRunFormPage :: ServerPartT IO Response
 newRunFormPage = dir "newrun" $ do
-  tz <- liftIO getCurrentTimeZone
-  utcNow <- liftIO getCurrentTime
-  now <- liftIO $ return $ utcToLocalTime tz utcNow
+  tz <- liftIO $ getCurrentTimeZone
+  utcNow <- liftIO $ getCurrentTime
+  now <- return $ utcToLocalTime tz utcNow
   ok $ toResponse $ newRunFormHtml now
 
 handleNewRunPage :: ServerPartT IO Response
