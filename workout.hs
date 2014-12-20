@@ -11,7 +11,8 @@ import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
 -- cabal install happstack
 import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, ServerPart, Response, ServerPartT)
-import Text.Blaze.Html5 as H
+import qualified Text.Blaze.Html5 as H
+import Text.Printf (printf)
 
 
 main:: IO()
@@ -81,17 +82,28 @@ dataTableHeader =
     H.td "Dist"
     H.td "Time"
     H.td "Incline"
+    H.td "Pace"
+    H.td "MpH"
     H.td "Note"
 
 dataTableRow :: Run -> H.Html
 dataTableRow r = H.tr $ do
-  H.td $ toHtml $ show $ date r
-  H.td $ toHtml $ show $ distance r
-  H.td $ toHtml $ show $ duration r
-  H.td $ toHtml $ show $ incline r
-  H.td $ toHtml $ comment r
+  H.td $ H.toHtml $ show $ date r
+  H.td $ H.toHtml $ show $ distance r
+  H.td $ H.toHtml $ printDuration $ duration r
+  H.td $ H.toHtml $ show $ incline r
+  H.td $ H.toHtml $ printDuration $ pace r
+  H.td $ H.toHtml $ show $ mph r
+  H.td $ H.toHtml $ comment r
 
---  foldr (\r a -> a ++ (show r)) ""
+pace :: Run -> Int
+pace r = round $ (fromIntegral (duration r)) / (distance r)
+
+mph :: Run -> Float
+mph r = 60 * 60 * (distance r) / (fromIntegral (duration r))
+
+printDuration :: Int -> String
+printDuration secs = printf "%d:%02d" (div secs 60) (mod secs 60)
 
 fakeDataHtml :: Int64 -> H.Html
 fakeDataHtml n = simpleMessageHtml (show n)
@@ -112,7 +124,7 @@ liftIoMyHead :: ServerPartT IO String
 liftIoMyHead = liftIO $ myHead getMessage
 
 myHead :: IO [String] -> IO String
-myHead xs = liftM Prelude.head xs
+myHead xs = liftM head xs
 
 dbConnect :: IO Connection
 dbConnect = connect defaultConnectInfo
@@ -125,7 +137,7 @@ getMessage :: IO [String]
 getMessage = do
   conn <- dbConnect
   results <- query conn "SELECT Message FROM foo" ()
-  return $ Prelude.map(\(Only r) -> r) results
+  return $ map(\(Only r) -> r) results
 
 --
 -- Database Admin
