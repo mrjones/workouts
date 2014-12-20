@@ -4,7 +4,7 @@ import Control.Monad (liftM, msum, forM_)
 import Control.Monad.IO.Class (liftIO)
 import Data.Int (Int64)
 import Data.Monoid (mconcat)
-import Data.Time.Calendar (Day)
+import Data.Time.Calendar (Day, fromGregorian)
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Time.Format (formatTime)
 import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, TimeZone)
@@ -71,7 +71,15 @@ handleNewRunPage :: ServerPartT IO Response
 handleNewRunPage = dir "handlenewrun" $ do
   distance <- body $ look "distance"
   time <- body $ look "time"
-  ok $ toResponse $ simpleMessageHtml (printf "%s in %s" distance time)
+  date <- body $ look "date"
+  incline <- body $ look "incline"
+  comment <- body $ look "comment"
+  run <- return $ (parseRun distance time date incline comment)
+  ok $ toResponse $ simpleMessageHtml (show run)
+
+parseRun :: String -> String -> String -> String -> String -> Maybe Run
+parseRun distanceS durationS dateS inclineS commentS =
+  Just (Run 3.0 1200 (fromGregorian 2014 12 20) 1.0 "FAKE")
 
 ---------
 
