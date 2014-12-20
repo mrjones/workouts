@@ -89,12 +89,12 @@ newRunFormHtml =
     H.body $ do
       H.form ! A.method "post" ! A.action "/handlenewrun" $ do
         H.table $ do
-          mconcat (map (uncurry newRunFormRow)                   
+          mconcat $ map (uncurry newRunFormRow)                   
                    [ ("distance", "text")
                    , ("time", "text")
                    , ("incline", "text")
                    , ("date", "date")
-                   ])
+                   ]
         H.input ! A.type_ "submit"
 
 newRunFormRow :: String -> String -> H.Html
@@ -103,9 +103,18 @@ newRunFormRow name formType =
     H.td $
       H.label ! A.for (toValue name) $ H.toHtml name
     H.td $
-      H.input ! A.type_ (toValue formType)
-              ! A.id (toValue name)
-              ! A.name (toValue name)
+      foldr (flip (!)) H.input (inputAttributes name formType)
+
+inputAttributes :: String -> String -> [ H.Attribute ]
+inputAttributes name formType =
+  let defaults = 
+        [ A.type_ (toValue formType)
+        , A.id (toValue name)
+        , A.name (toValue name)
+        ]
+  in case formType of
+    "date" -> (A.value "2014-12-20"):defaults
+    _ -> defaults
 
 dataTableHtml :: [ Run ] -> H.Html
 dataTableHtml rs =
