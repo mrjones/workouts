@@ -96,33 +96,30 @@ newRunFormHtml time =
     H.body $ do
       H.form ! A.method "post" ! A.action "/handlenewrun" $ do
         H.table $ do
-          mconcat $ map (uncurry (newRunFormRow time))
-                   [ ("distance", "text")
-                   , ("time", "text")
-                   , ("incline", "text")
-                   , ("date", "date")
-                   , ("comment", "text")
+          mconcat $ map newRunFormRow
+                   [ ("Distance", "distance", "text", [])
+                   , ("Time", "time", "text", [])
+                   , ("Incline", "incline", "text", [])
+                   , ("Date", "date", "date", [
+                         (A.value (toValue (formatTimeForInput time)))])
+                   , ("Comment", "comment", "text", [
+                         (A.size (toValue (75 :: Int)))])
                    ]
         H.input ! A.type_ "submit"
 
-newRunFormRow :: LocalTime -> String -> String -> H.Html
-newRunFormRow time name formType =
+newRunFormRow :: (String, String, String, [H.Attribute]) -> H.Html
+newRunFormRow (name, id, formType, extraAs) =
+  let defaultAs = 
+        [ A.type_ (toValue formType)
+        , A.id (toValue id)
+        , A.name (toValue id)
+        ] in
   H.tr $ do
     H.td $
-      H.label ! A.for (toValue name) $ H.toHtml name
+      H.label ! A.for (toValue id) $ H.toHtml name
     H.td $
-      foldr (flip (!)) H.input (inputAttributes time name formType)
+      foldr (flip (!)) H.input (defaultAs ++ extraAs)
 
-inputAttributes :: LocalTime -> String -> String -> [ H.Attribute ]
-inputAttributes time name formType =
-  let defaults = 
-        [ A.type_ (toValue formType)
-        , A.id (toValue name)
-        , A.name (toValue name)
-        ]
-  in case formType of
-    "date" -> (A.value (toValue (formatTimeForInput time))):defaults
-    _ -> defaults
 
 formatTimeForInput :: LocalTime -> String
 formatTimeForInput time = formatTime defaultTimeLocale "%Y-%m-%d" time
