@@ -5,6 +5,9 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Int (Int64)
 import Data.Monoid (mconcat)
 import Data.Time.Calendar (Day)
+import Data.Time.Clock (UTCTime, getCurrentTime)
+import Data.Time.Format (formatTime)
+import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, TimeZone)
 -- sudo apt-get install libmysqlclient-dev
 -- cabal install mysql-simple
 import Database.MySQL.Simple
@@ -12,6 +15,7 @@ import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
 -- cabal install happstack
 import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, ServerPart, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy)
+import System.Locale (defaultTimeLocale)
 import Text.Blaze (toValue)
 import Text.Blaze.Html5 ((!))
 import qualified Text.Blaze.Html5 as H
@@ -58,7 +62,10 @@ dumpDataPage = dir "dump" $ do
 
 newRunFormPage :: ServerPartT IO Response
 newRunFormPage = dir "newrun" $ do
-  ok $ toResponse $ newRunFormHtml
+  tz <- liftIO getCurrentTimeZone
+  utcNow <- liftIO getCurrentTime
+  now <- liftIO $ return $ utcToLocalTime tz utcNow
+  ok $ toResponse $ newRunFormHtml now
 
 handleNewRunPage :: ServerPartT IO Response
 handleNewRunPage = dir "handlenewrun" $ do
@@ -81,15 +88,15 @@ instance QueryResults Run where
 
 ---------
 
-newRunFormHtml :: H.Html
-newRunFormHtml =
+newRunFormHtml :: LocalTime -> H.Html
+newRunFormHtml time =
   H.html $ do
     H.head $ do
       H.title "New Run"
     H.body $ do
       H.form ! A.method "post" ! A.action "/handlenewrun" $ do
         H.table $ do
-          mconcat $ map (uncurry newRunFormRow)                   
+          mconcat $ map (uncurry (newRunFormRow time))
                    [ ("distance", "text")
                    , ("time", "text")
                    , ("incline", "text")
@@ -97,24 +104,27 @@ newRunFormHtml =
                    ]
         H.input ! A.type_ "submit"
 
-newRunFormRow :: String -> String -> H.Html
-newRunFormRow name formType =
+newRunFormRow :: LocalTime -> String -> String -> H.Html
+newRunFormRow time name formType =
   H.tr $ do
     H.td $
       H.label ! A.for (toValue name) $ H.toHtml name
     H.td $
-      foldr (flip (!)) H.input (inputAttributes name formType)
+      foldr (flip (!)) H.input (inputAttributes time name formType)
 
-inputAttributes :: String -> String -> [ H.Attribute ]
-inputAttributes name formType =
+inputAttributes :: LocalTime -> String -> String -> [ H.Attribute ]
+inputAttributes time name formType =
   let defaults = 
         [ A.type_ (toValue formType)
         , A.id (toValue name)
         , A.name (toValue name)
         ]
   in case formType of
-    "date" -> (A.value "2014-12-20"):defaults
+    "date" -> (A.value (toValue (formatTimeForInput time))):defaults
     _ -> defaults
+
+formatTimeForInput :: LocalTime -> String
+formatTimeForInput time = formatTime defaultTimeLocale "%Y-%m-%d" time
 
 dataTableHtml :: [ Run ] -> H.Html
 dataTableHtml rs =
