@@ -101,6 +101,7 @@ newRunFormHtml time =
                    , ("time", "text")
                    , ("incline", "text")
                    , ("date", "date")
+                   , ("comment", "text")
                    ]
         H.input ! A.type_ "submit"
 
