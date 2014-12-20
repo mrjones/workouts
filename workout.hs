@@ -97,7 +97,6 @@ parseDuration input = do
       min <- readMaybe (unpack minS) :: Maybe Int
       sec <- readMaybe (unpack secS) :: Maybe Int
       Just (min * 60 + sec)
-      Just 1200
     _ -> Nothing
 
 parseDate :: String -> Maybe Day
