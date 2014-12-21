@@ -120,7 +120,7 @@ editRunFormPage = dir "editrun" $ do
 
 handleMutateRunPage :: ServerPartT IO Response
 handleMutateRunPage = dir "handlemutaterun" $ do
-  mutationKindS <- body $ look "mutation_kind"
+  mutationKindS <- body $ look "button"
   distanceS <- body $ look "distance"
   timeS <- body $ look "time"
   dateS <- body $ look "date"
@@ -131,7 +131,9 @@ handleMutateRunPage = dir "handlemutaterun" $ do
   run <- return $ (parseRun distanceS timeS dateS inclineS commentS idS)
   conn <- liftIO dbConnect
   n <- liftIO $ storeRun conn run mutationKind
-  seeOther ("/dump" :: String) (toResponse ("Redirecting to run list" :: String))
+  case n of
+    1 -> seeOther ("/dump" :: String) (toResponse ("Redirecting to run list" :: String))
+    0 -> ok $ toResponse $ simpleMessageHtml "error"
 
 parseRun :: String -> String -> String -> String -> String -> String -> Maybe Run
 parseRun distanceS durationS dateS inclineS commentS idS = do
@@ -175,6 +177,9 @@ storeRun conn mr mkind =
       Modify -> case mr of
         Just r -> execute conn "UPDATE happstack.runs SET date=?, miles=?, duration_sec=?, incline=?, comment=? WHERE id=?" (date r, distance r, duration r, incline r, comment r, runid r)
         Nothing -> return 0
+      Delete -> case mr of
+        Just r -> execute conn "DELETE FROM happstack.runs WHERE id = (?)" [runid r]
+        Nothing -> return 0
     Nothing -> return 0
 
 ---------
@@ -193,7 +198,7 @@ instance QueryResults Run where
 
 ---------
 
-data MutationKind = Create | Modify deriving (Read, Show)
+data MutationKind = Create | Modify | Delete deriving (Read, Show)
 
 runDataHtml :: Maybe Run -> Day -> MutationKind -> H.Html
 runDataHtml run today mutationKind =
@@ -219,7 +224,12 @@ runDataHtml run today mutationKind =
                    , ("Comment", "comment", "text", "", comment, [
                          (A.size (toValue (75 :: Int)))])
                    ]
-        H.input ! A.type_ "submit"
+        case run of
+          Just _ -> do
+            H.input ! A.type_ "submit" ! A.name "button" ! A.value (toValue $ show Modify)
+            H.input ! A.type_ "submit" ! A.name "button" ! A.value (toValue $ show Delete)
+          Nothing -> H.input ! A.type_ "submit" ! A.name "button" ! A.value (toValue $ show Create)
+
 
 runDataFormRow :: Maybe Run -> (String, String, String, String, (Run -> String), [H.Attribute]) -> H.Html
 runDataFormRow mrun (name, id, formType, defaultValue, extractValue, extraAs) =
