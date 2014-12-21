@@ -51,15 +51,24 @@ dropTablePage = dir "admin" $ dir "droptable" $ do
   i <- liftIO dropTable
   ok (toResponse (executeSqlHtml "drop table" i))
 
-data RunMeta = RunMeta { daysOff :: Integer }
+data RunMeta = RunMeta { daysOff :: Integer, runScore :: Integer }
 
 annotate :: [ Run ] -> [ (Run, RunMeta) ]
-annotate rs = zip rs (map (\d -> RunMeta d) (computeRest (map date rs)))
+annotate rs = zip rs (annotate2 rs)
+
+annotate2 :: [ Run ] -> [ RunMeta ]
+annotate2 rs = map (\(r, s) -> RunMeta r s) (zip (computeRest (map date rs)) (map scoreRun rs))
 
 computeRest :: [ Day ] -> [ Integer ]
 computeRest ds =
   let shifted = take (length ds) ((head ds):ds) :: [ Day ]
   in map (uncurry diffDays) (zip ds shifted)
+
+-- 1000 * 4 * (distance^1.06)/(time_minutes)
+scoreRun :: Run -> Integer
+scoreRun r =
+  let time_minutes = (fromIntegral (duration r)) / 60
+  in round (1000 * 4 * ((distance r) ** (1.06)) / time_minutes)
 
 dumpDataPage :: ServerPartT IO Response
 dumpDataPage = dir "dump" $ do
@@ -217,7 +226,7 @@ dataTableHeader :: H.Html
 dataTableHeader =
   H.thead $ H.tr $ do
     mconcat $ map (H.td . H.b)
-      [ "Date", "Dist", "Time", "Incline", "Pace", "MpH", "Node", "Rest", "Edit" ]
+      [ "Date", "Dist", "Time", "Incline", "Pace", "MpH", "Rest", "Score", "Comment", "Edit" ]
 
 dataTableRow :: (Run, RunMeta) -> H.Html
 dataTableRow (r,meta) = H.tr $ do
@@ -227,8 +236,9 @@ dataTableRow (r,meta) = H.tr $ do
   H.td $ H.toHtml $ show $ incline r
   H.td $ H.toHtml $ printDuration $ pace r
   H.td $ H.toHtml (printf "%.2f" (mph r) :: String)
-  H.td $ H.toHtml $ comment r
   H.td $ H.toHtml $ show $ daysOff meta
+  H.td $ H.toHtml $ show $ runScore meta
+  H.td $ H.toHtml $ comment r
   H.td $ do
     "["
     H.a ! A.href (toValue ("/editrun?id=" ++ (show (runid r)))) $ "Edit"
