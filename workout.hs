@@ -9,7 +9,7 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Int (Int64)
 import Data.Monoid (mconcat)
 import Data.Text (splitOn, pack, unpack)
-import Data.Time.Calendar (Day, fromGregorianValid, fromGregorian)
+import Data.Time.Calendar (Day, fromGregorianValid, fromGregorian, diffDays)
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (formatTime, FormatTime)
 import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, localDay)
@@ -51,11 +51,24 @@ dropTablePage = dir "admin" $ dir "droptable" $ do
   i <- liftIO dropTable
   ok (toResponse (executeSqlHtml "drop table" i))
 
+data RunMeta = RunMeta { daysOff :: Integer }
+
+annotate :: [ Run ] -> [ (Run, RunMeta) ]
+annotate rs = zip rs (map (\d -> RunMeta d) (diffList (map date rs)))
+
+diffList :: [ Day ] -> [ Integer ]
+diffList ds =
+  let shifted = take (length ds) ((fromGregorian 2014 1 1):ds) in
+  map (\(a,b) -> diffDays a b) (zip ds shifted)
+
+annotateOne :: Run -> RunMeta
+annotateOne _ = RunMeta 1
+
 dumpDataPage :: ServerPartT IO Response
 dumpDataPage = dir "dump" $ do
   conn <- liftIO dbConnect
   runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs ORDER BY date ASC" ()
-  ok (toResponse (dataTableHtml runs))
+  ok (toResponse (dataTableHtml (annotate runs)))
 
 newRunFormPage :: ServerPartT IO Response
 newRunFormPage = dir "newrun" $ do
@@ -193,7 +206,7 @@ runDataFormRow mrun (name, id, formType, defaultValue, extractValue, extraAs) =
 formatTimeForInput :: FormatTime t => t -> String
 formatTimeForInput time = formatTime defaultTimeLocale "%Y-%m-%d" time
 
-dataTableHtml :: [ Run ] -> H.Html
+dataTableHtml :: [ (Run, RunMeta) ] -> H.Html
 dataTableHtml rs =
   H.html $ do
     H.head $ do
@@ -207,10 +220,10 @@ dataTableHeader :: H.Html
 dataTableHeader =
   H.thead $ H.tr $ do
     mconcat $ map (H.td . H.b)
-      [ "Date", "Dist", "Time", "Incline", "Pace", "MpH", "Node", "Edit" ]
+      [ "Date", "Dist", "Time", "Incline", "Pace", "MpH", "Node", "Rest", "Edit" ]
 
-dataTableRow :: Run -> H.Html
-dataTableRow r = H.tr $ do
+dataTableRow :: (Run, RunMeta) -> H.Html
+dataTableRow (r,meta) = H.tr $ do
   H.td $ H.toHtml $ show $ date r
   H.td $ H.toHtml $ show $ distance r
   H.td $ H.toHtml $ printDuration $ duration r
@@ -218,6 +231,7 @@ dataTableRow r = H.tr $ do
   H.td $ H.toHtml $ printDuration $ pace r
   H.td $ H.toHtml (printf "%.2f" (mph r) :: String)
   H.td $ H.toHtml $ comment r
+  H.td $ H.toHtml $ show $ daysOff meta
   H.td $ do
     "["
     H.a ! A.href (toValue ("/editrun?id=" ++ (show (runid r)))) $ "Edit"
