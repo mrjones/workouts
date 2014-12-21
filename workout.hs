@@ -58,7 +58,7 @@ annotate rs = zip rs (map (\d -> RunMeta d) (diffList (map date rs)))
 
 diffList :: [ Day ] -> [ Integer ]
 diffList ds =
-  let shifted = take (length ds) ((fromGregorian 2014 1 1):ds) in
+  let shifted = take (length ds) ((head ds):ds) in
   map (\(a,b) -> diffDays a b) (zip ds shifted)
 
 annotateOne :: Run -> RunMeta
