@@ -54,7 +54,7 @@ dropTablePage = dir "admin" $ dir "droptable" $ do
 dumpDataPage :: ServerPartT IO Response
 dumpDataPage = dir "dump" $ do
   conn <- liftIO dbConnect
-  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs" ()
+  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs ORDER BY date ASC" ()
   ok (toResponse (dataTableHtml runs))
 
 newRunFormPage :: ServerPartT IO Response
@@ -216,7 +216,7 @@ dataTableRow r = H.tr $ do
   H.td $ H.toHtml $ printDuration $ duration r
   H.td $ H.toHtml $ show $ incline r
   H.td $ H.toHtml $ printDuration $ pace r
-  H.td $ H.toHtml $ show $ mph r
+  H.td $ H.toHtml (printf "%.2f" (mph r) :: String)
   H.td $ H.toHtml $ comment r
   H.td $ do
     "["
