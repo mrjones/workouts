@@ -38,7 +38,7 @@ allPages = do
        , dumpDataPage
        , editRunFormPage
        , newRunFormPage
-       , handleNewRunPage
+       , handleMutateRunPage
        ]
 
 mkTablePage :: ServerPartT IO Response
@@ -62,34 +62,38 @@ newRunFormPage = dir "newrun" $ do
   tz <- liftIO $ getCurrentTimeZone
   utcNow <- liftIO $ getCurrentTime
   today <- return $ localDay $ utcToLocalTime tz utcNow
-  ok $ toResponse $ runDataHtml Nothing today
+  ok $ toResponse $ runDataHtml Nothing today Create
 
 editRunFormPage :: ServerPartT IO Response
 editRunFormPage = dir "editrun" $ do
   id <- queryString $ look "id"
   conn <- liftIO dbConnect
   runs <- liftIO $ (query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs WHERE id = (?)" [id])
-  ok $ toResponse $ runDataHtml (Just (head runs)) (fromGregorian 2014 1 1)
+  ok $ toResponse $ runDataHtml (Just (head runs)) (fromGregorian 2014 1 1) Modify
 
-handleNewRunPage :: ServerPartT IO Response
-handleNewRunPage = dir "handlenewrun" $ do
+handleMutateRunPage :: ServerPartT IO Response
+handleMutateRunPage = dir "handlemutaterun" $ do
+  mutationKindS <- body $ look "mutation_kind"
   distanceS <- body $ look "distance"
   timeS <- body $ look "time"
   dateS <- body $ look "date"
   inclineS <- body $ look "incline"
   commentS <- body $ look "comment"
-  run <- return $ (parseRun distanceS timeS dateS inclineS commentS)
+  mutationKind <- return $ readMaybe mutationKindS
+  idS <- body $ look "id"
+  run <- return $ (parseRun distanceS timeS dateS inclineS commentS idS)
   conn <- liftIO dbConnect
-  _ <- liftIO $ storeRun conn run
-  ok $ toResponse $ simpleMessageHtml (show run)
+  n <- liftIO $ storeRun conn run mutationKind
+  ok $ toResponse $ simpleMessageHtml ((show run) ++ (show n))
 
-parseRun :: String -> String -> String -> String -> String -> Maybe Run
-parseRun distanceS durationS dateS inclineS commentS = do
+parseRun :: String -> String -> String -> String -> String -> String -> Maybe Run
+parseRun distanceS durationS dateS inclineS commentS idS = do
   distance <- readMaybe distanceS :: Maybe Float
   incline <- readMaybe inclineS :: Maybe Float
   duration <- parseDuration durationS
   date <- parseDate dateS
-  Just (Run distance duration date incline commentS 0)
+  id <- readMaybe idS :: Maybe Int
+  Just (Run distance duration date incline commentS id)
 
 parseDuration :: String -> Maybe Int
 parseDuration input = do
@@ -112,12 +116,19 @@ parseDate input = do
       fromGregorianValid year month day
     _ -> Nothing
 
-storeRun :: Connection -> Maybe Run -> IO Int64
-storeRun conn mr = case mr of
-  Just r -> execute conn "INSERT INTO happstack.runs (date, miles, duration_sec, incline, comment) VALUES (?, ?, ?, ?, ?)"
-            (date r, distance r, duration r, incline r, comment r)
-  Nothing -> return 0
-
+-- TODO(mrjones): push the maybes up to a higher level
+storeRun :: Connection -> Maybe Run -> Maybe MutationKind -> IO Int64
+storeRun conn mr mkind =
+  case mkind of
+    Just kind -> case kind of
+      Create -> case mr of
+        Just r -> execute conn "INSERT INTO happstack.runs (date, miles, duration_sec, incline, comment) VALUES (?, ?, ?, ?, ?)"
+                  (date r, distance r, duration r, incline r, comment r)
+        Nothing -> return 0
+      Modify -> case mr of
+        Just r -> execute conn "UPDATE happstack.runs SET date=?, miles=?, duration_sec=?, incline=?, comment=? WHERE id=?" (date r, distance r, duration r, incline r, comment r, runid r)
+        Nothing -> return 0
+    Nothing -> return 0
 
 ---------
 
@@ -135,13 +146,23 @@ instance QueryResults Run where
 
 ---------
 
-runDataHtml :: Maybe Run -> Day -> H.Html
-runDataHtml run today =
+data MutationKind = Create | Modify deriving (Read, Show)
+
+runDataHtml :: Maybe Run -> Day -> MutationKind -> H.Html
+runDataHtml run today mutationKind =
   H.html $ do
     H.head $ do
       H.title "New Run"
     H.body $ do
-      H.form ! A.method "post" ! A.action "/handlenewrun" $ do
+      H.form ! A.method "post" ! A.action "/handlemutaterun" $ do
+        H.input ! A.type_ "hidden"
+                ! A.name "mutation_kind"
+                ! A.value (toValue (show mutationKind))
+        H.input ! A.type_ "hidden"
+                ! A.name "id"
+                ! A.value (case run of
+                              Just r -> toValue (show (runid r))
+                              Nothing -> "0")
         H.table $ do
           mconcat $ map (runDataFormRow run)
                    [ ("Distance", "distance", "text", "", (show . distance), [])
