@@ -82,10 +82,10 @@ computeRest ds =
   in map (uncurry diffDays) (zip ds shifted)
 
 rankAsc :: Ord a => [a] -> [Maybe Int]
-rankAsc = rank reverse
+rankAsc = rank id
 
 rankDesc :: Ord a => [a] -> [Maybe Int]
-rankDesc = rank id
+rankDesc = rank reverse
 
 rank :: Ord a => ([a] -> [a]) -> [a] -> [Maybe Int]
 rank order ins =
@@ -249,6 +249,7 @@ dataTableHtml rs =
       H.table $ do
         dataTableHeader
         mapM_ dataTableRow rs
+      H.a ! A.href "/newrun" $ "New run"
 
 dataTableHeader :: H.Html
 dataTableHeader =
