@@ -51,13 +51,13 @@ dropTablePage = dir "admin" $ dir "droptable" $ do
   i <- liftIO dropTable
   ok (toResponse (executeSqlHtml "drop table" i))
 
-data RunMeta = RunMeta { daysOff :: Integer, runScore :: Integer }
+data RunMeta = RunMeta { daysOff :: Integer }
 
 annotate :: [ Run ] -> [ (Run, RunMeta) ]
 annotate rs = zip rs (annotate2 rs)
 
 annotate2 :: [ Run ] -> [ RunMeta ]
-annotate2 rs = map (\(r, s) -> RunMeta r s) (zip (computeRest (map date rs)) (map scoreRun rs))
+annotate2 rs = map (\r -> RunMeta r) (computeRest (map date rs))
 
 computeRest :: [ Day ] -> [ Integer ]
 computeRest ds =
@@ -237,7 +237,7 @@ dataTableRow (r,meta) = H.tr $ do
   H.td $ H.toHtml $ printDuration $ pace r
   H.td $ H.toHtml (printf "%.2f" (mph r) :: String)
   H.td $ H.toHtml $ show $ daysOff meta
-  H.td $ H.toHtml $ show $ runScore meta
+  H.td $ H.toHtml $ show $ scoreRun r
   H.td $ H.toHtml $ comment r
   H.td $ do
     "["
