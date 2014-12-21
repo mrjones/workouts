@@ -54,15 +54,12 @@ dropTablePage = dir "admin" $ dir "droptable" $ do
 data RunMeta = RunMeta { daysOff :: Integer }
 
 annotate :: [ Run ] -> [ (Run, RunMeta) ]
-annotate rs = zip rs (map (\d -> RunMeta d) (diffList (map date rs)))
+annotate rs = zip rs (map (\d -> RunMeta d) (computeRest (map date rs)))
 
-diffList :: [ Day ] -> [ Integer ]
-diffList ds =
-  let shifted = take (length ds) ((head ds):ds) in
-  map (\(a,b) -> diffDays a b) (zip ds shifted)
-
-annotateOne :: Run -> RunMeta
-annotateOne _ = RunMeta 1
+computeRest :: [ Day ] -> [ Integer ]
+computeRest ds =
+  let shifted = take (length ds) ((head ds):ds) :: [ Day ]
+  in map (uncurry diffDays) (zip ds shifted)
 
 dumpDataPage :: ServerPartT IO Response
 dumpDataPage = dir "dump" $ do
