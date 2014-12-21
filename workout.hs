@@ -93,10 +93,10 @@ rank order ins =
   in map (\x -> findIndex ((==) x) sorted) ins
 
 -- 1000 * 4 * (distance^1.06)/(time_minutes)
-scoreRun :: Run -> Integer
+scoreRun :: Run -> Float
 scoreRun r =
   let time_minutes = (fromIntegral (duration r)) / 60
-  in round (1000 * 4 * ((distance r) ** (1.06)) / time_minutes)
+  in 1000 * 4 * ((distance r) ** (1.06)) / time_minutes
 
 dumpDataPage :: ServerPartT IO Response
 dumpDataPage = dir "dump" $ do
@@ -273,10 +273,10 @@ dataTableRow (r,meta) = H.tr $ do
   H.td $ H.toHtml $ show $ distance r
   H.td $ H.toHtml $ printDuration $ duration r
   H.td $ H.toHtml $ show $ incline r
-  H.td $ H.toHtml $ printDuration $ pace r
+  H.td $ H.toHtml $ printDuration $ round (pace r)
   H.td $ H.toHtml (printf "%.2f" (mph r) :: String)
   H.td $ H.toHtml $ show $ daysOff meta
-  H.td $ H.toHtml $ show $ scoreRun r
+  H.td $ H.toHtml $ show $ round (scoreRun r)
   H.td $ H.toHtml $ show $ scoreRank meta
   H.td $ H.toHtml $ show $ paceRank meta
   H.td $ H.toHtml $ comment r
@@ -285,8 +285,8 @@ dataTableRow (r,meta) = H.tr $ do
     H.a ! A.href (toValue ("/editrun?id=" ++ (show (runid r)))) $ "Edit"
     "]"
 
-pace :: Run -> Int
-pace r = round $ (fromIntegral (duration r)) / (distance r)
+pace :: Run -> Float
+pace r = (fromIntegral (duration r)) / (distance r)
 
 mph :: Run -> Float
 mph r = 60 * 60 * (distance r) / (fromIntegral (duration r))
