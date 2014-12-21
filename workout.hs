@@ -9,14 +9,14 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Int (Int64)
 import Data.Monoid (mconcat)
 import Data.Text (splitOn, pack, unpack)
-import Data.Time.Calendar (Day, fromGregorianValid)
+import Data.Time.Calendar (Day, fromGregorianValid, fromGregorian)
 import Data.Time.Clock (getCurrentTime)
-import Data.Time.Format (formatTime)
-import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone)
+import Data.Time.Format (formatTime, FormatTime)
+import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, localDay)
 import Database.MySQL.Simple
 import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
-import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy)
+import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString)
 import System.Locale (defaultTimeLocale)
 import Text.Blaze (toValue)
 import Text.Blaze.Html5 ((!))
@@ -36,6 +36,7 @@ allPages = do
   msum [ mkTablePage
        , dropTablePage
        , dumpDataPage
+       , editRunFormPage
        , newRunFormPage
        , handleNewRunPage
        ]
@@ -53,15 +54,22 @@ dropTablePage = dir "admin" $ dir "droptable" $ do
 dumpDataPage :: ServerPartT IO Response
 dumpDataPage = dir "dump" $ do
   conn <- liftIO dbConnect
-  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment FROM happstack.runs" ()
+  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs" ()
   ok (toResponse (dataTableHtml runs))
 
 newRunFormPage :: ServerPartT IO Response
 newRunFormPage = dir "newrun" $ do
   tz <- liftIO $ getCurrentTimeZone
   utcNow <- liftIO $ getCurrentTime
-  localNow <- return $ utcToLocalTime tz utcNow
-  ok $ toResponse $ newRunFormHtml localNow
+  today <- return $ localDay $ utcToLocalTime tz utcNow
+  ok $ toResponse $ runDataHtml Nothing today
+
+editRunFormPage :: ServerPartT IO Response
+editRunFormPage = dir "editrun" $ do
+  id <- queryString $ look "id"
+  conn <- liftIO dbConnect
+  runs <- liftIO $ (query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs WHERE id = (?)" [id])
+  ok $ toResponse $ runDataHtml (Just (head runs)) (fromGregorian 2014 1 1)
 
 handleNewRunPage :: ServerPartT IO Response
 handleNewRunPage = dir "handlenewrun" $ do
@@ -81,7 +89,7 @@ parseRun distanceS durationS dateS inclineS commentS = do
   incline <- readMaybe inclineS :: Maybe Float
   duration <- parseDuration durationS
   date <- parseDate dateS
-  Just (Run distance duration date incline commentS)
+  Just (Run distance duration date incline commentS 0)
 
 parseDuration :: String -> Maybe Int
 parseDuration input = do
@@ -118,39 +126,42 @@ data Run = Run { distance :: Float
                , date :: Day
                , incline :: Float
                , comment :: String
+               , runid :: Int
                } deriving (Show)
 
 instance QueryResults Run where
-  convertResults [f_dist,f_dur,f_date,f_incl,f_comm] [v_dist,v_dur,v_date,v_incl,v_comm] =
-    Run (convert f_dist v_dist) (convert f_dur v_dur) (convert f_date v_date) (convert f_incl v_incl) (convert f_comm v_comm)
+  convertResults [f_dist,f_dur,f_date,f_incl,f_comm,f_id] [v_dist,v_dur,v_date,v_incl,v_comm,v_id] =
+    Run (convert f_dist v_dist) (convert f_dur v_dur) (convert f_date v_date) (convert f_incl v_incl) (convert f_comm v_comm) (convert f_id v_id)
 
 ---------
 
-newRunFormHtml :: LocalTime -> H.Html
-newRunFormHtml time =
+runDataHtml :: Maybe Run -> Day -> H.Html
+runDataHtml run today =
   H.html $ do
     H.head $ do
       H.title "New Run"
     H.body $ do
       H.form ! A.method "post" ! A.action "/handlenewrun" $ do
         H.table $ do
-          mconcat $ map newRunFormRow
-                   [ ("Distance", "distance", "text", [])
-                   , ("Time", "time", "text", [])
-                   , ("Incline", "incline", "text", [])
-                   , ("Date", "date", "date", [
-                         (A.value (toValue (formatTimeForInput time)))])
-                   , ("Comment", "comment", "text", [
+          mconcat $ map (runDataFormRow run)
+                   [ ("Distance", "distance", "text", "", (show . distance), [])
+                   , ("Time", "time", "text", "", (printDuration . duration), [])
+                   , ("Incline", "incline", "text", "", (show . incline), [])
+                   , ("Date", "date", "date", formatTimeForInput today, (formatTimeForInput . date), [])
+                   , ("Comment", "comment", "text", "", comment, [
                          (A.size (toValue (75 :: Int)))])
                    ]
         H.input ! A.type_ "submit"
 
-newRunFormRow :: (String, String, String, [H.Attribute]) -> H.Html
-newRunFormRow (name, id, formType, extraAs) =
+runDataFormRow :: Maybe Run -> (String, String, String, String, (Run -> String), [H.Attribute]) -> H.Html
+runDataFormRow mrun (name, id, formType, defaultValue, extractValue, extraAs) =
   let defaultAs = 
         [ A.type_ (toValue formType)
         , A.id (toValue id)
         , A.name (toValue id)
+        , case mrun of
+             Just run -> A.value $ toValue $ extractValue run
+             Nothing -> A.value $ toValue defaultValue
         ] in
   H.tr $ do
     H.td $
@@ -158,8 +169,7 @@ newRunFormRow (name, id, formType, extraAs) =
     H.td $
       foldr (flip (!)) H.input (defaultAs ++ extraAs)
 
-
-formatTimeForInput :: LocalTime -> String
+formatTimeForInput :: FormatTime t => t -> String
 formatTimeForInput time = formatTime defaultTimeLocale "%Y-%m-%d" time
 
 dataTableHtml :: [ Run ] -> H.Html
@@ -175,13 +185,8 @@ dataTableHtml rs =
 dataTableHeader :: H.Html
 dataTableHeader =
   H.thead $ H.tr $ do
-    H.td "Date"
-    H.td "Dist"
-    H.td "Time"
-    H.td "Incline"
-    H.td "Pace"
-    H.td "MpH"
-    H.td "Note"
+    mconcat $ map (H.td . H.b)
+      [ "Date", "Dist", "Time", "Incline", "Pace", "MpH", "Node", "Edit" ]
 
 dataTableRow :: Run -> H.Html
 dataTableRow r = H.tr $ do
@@ -192,6 +197,10 @@ dataTableRow r = H.tr $ do
   H.td $ H.toHtml $ printDuration $ pace r
   H.td $ H.toHtml $ show $ mph r
   H.td $ H.toHtml $ comment r
+  H.td $ do
+    "["
+    H.a ! A.href (toValue ("/editrun?id=" ++ (show (runid r)))) $ "Edit"
+    "]"
 
 pace :: Run -> Int
 pace r = round $ (fromIntegral (duration r)) / (distance r)
