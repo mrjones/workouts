@@ -202,9 +202,6 @@ mph r = 60 * 60 * (distance r) / (fromIntegral (duration r))
 printDuration :: Int -> String
 printDuration secs = printf "%d:%02d" (div secs 60) (mod secs 60)
 
-execins :: Connection -> IO Int64
-execins conn = execute conn "INSERT INTO happstack.runs (date, miles, duration_sec, incline, comment) VALUES ('2014-12-9', 3.0, 1200, 1.0, 'First post!')" ()
-
 dbConnect :: IO Connection
 dbConnect = connect defaultConnectInfo
     { connectUser = "happstack"
