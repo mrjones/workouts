@@ -35,7 +35,6 @@ allPages = do
   decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
   msum [ mkTablePage
        , dropTablePage
-       , insertFakeDataPage
        , dumpDataPage
        , newRunFormPage
        , handleNewRunPage
@@ -50,12 +49,6 @@ dropTablePage :: ServerPartT IO Response
 dropTablePage = dir "admin" $ dir "droptable" $ do
   i <- liftIO dropTable
   ok (toResponse (executeSqlHtml "drop table" i))
-
-insertFakeDataPage :: ServerPartT IO Response
-insertFakeDataPage = dir "fakedata" $ do
-  conn <- liftIO dbConnect
-  n <- liftIO (execins conn)
-  ok (toResponse (fakeDataHtml n))
 
 dumpDataPage :: ServerPartT IO Response
 dumpDataPage = dir "dump" $ do
@@ -209,20 +202,8 @@ mph r = 60 * 60 * (distance r) / (fromIntegral (duration r))
 printDuration :: Int -> String
 printDuration secs = printf "%d:%02d" (div secs 60) (mod secs 60)
 
-fakeDataHtml :: Int64 -> H.Html
-fakeDataHtml n = simpleMessageHtml (show n)
-
 execins :: Connection -> IO Int64
 execins conn = execute conn "INSERT INTO happstack.runs (date, miles, duration_sec, incline, comment) VALUES ('2014-12-9', 3.0, 1200, 1.0, 'First post!')" ()
-
---helloPage :: ServerPartT IO Response
---helloPage = do
---    message <- liftIoMyHead
---    helloPage2 message
-
---helloPage2 :: String -> ServerPartT IO Response
---helloPage2 msg = ok (toResponse (simpleMessageHtml msg))
-
 
 dbConnect :: IO Connection
 dbConnect = connect defaultConnectInfo
