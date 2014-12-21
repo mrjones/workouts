@@ -17,7 +17,7 @@ import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, local
 import Database.MySQL.Simple
 import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
-import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString)
+import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther)
 import System.Locale (defaultTimeLocale)
 import Text.Blaze (toValue)
 import Text.Blaze.Html5 ((!))
@@ -131,7 +131,7 @@ handleMutateRunPage = dir "handlemutaterun" $ do
   run <- return $ (parseRun distanceS timeS dateS inclineS commentS idS)
   conn <- liftIO dbConnect
   n <- liftIO $ storeRun conn run mutationKind
-  ok $ toResponse $ simpleMessageHtml ((show run) ++ (show n))
+  seeOther ("/dump" :: String) (toResponse ("Redirecting to run list" :: String))
 
 parseRun :: String -> String -> String -> String -> String -> String -> Maybe Run
 parseRun distanceS durationS dateS inclineS commentS idS = do
