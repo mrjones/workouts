@@ -7,6 +7,7 @@
 import Control.Monad (msum)
 import Control.Monad.IO.Class (liftIO)
 import Data.Int (Int64)
+import Data.List (reverse, sort, findIndex)
 import Data.Monoid (mconcat)
 import Data.Text (splitOn, pack, unpack)
 import Data.Time.Calendar (Day, fromGregorianValid, fromGregorian, diffDays)
@@ -51,18 +52,45 @@ dropTablePage = dir "admin" $ dir "droptable" $ do
   i <- liftIO dropTable
   ok (toResponse (executeSqlHtml "drop table" i))
 
-data RunMeta = RunMeta { daysOff :: Integer }
+data RunMeta = RunMeta { daysOff :: Integer
+                       , scoreRank :: Int
+                       , paceRank :: Int }
 
 annotate :: [ Run ] -> [ (Run, RunMeta) ]
 annotate rs = zip rs (annotate2 rs)
 
 annotate2 :: [ Run ] -> [ RunMeta ]
-annotate2 rs = map (\r -> RunMeta r) (computeRest (map date rs))
+annotate2 rs = map buildMeta
+               (zip3
+                (computeRest (map date rs))
+                (rankDesc (map scoreRun rs))
+                (rankAsc (map pace rs)))
+
+buildMeta :: (Integer, Maybe Int, Maybe Int) -> RunMeta
+buildMeta (rest, mscore, mpace) =
+  let score = case mscore of
+        Just s -> s + 1
+        Nothing -> 0
+      pace = case mpace of
+        Just p -> p + 1
+        Nothing -> 0
+  in RunMeta rest score pace
 
 computeRest :: [ Day ] -> [ Integer ]
 computeRest ds =
   let shifted = take (length ds) ((head ds):ds) :: [ Day ]
   in map (uncurry diffDays) (zip ds shifted)
+
+rankAsc :: Ord a => [a] -> [Maybe Int]
+rankAsc = rank reverse
+
+rankDesc :: Ord a => [a] -> [Maybe Int]
+rankDesc = rank id
+
+rank :: Ord a => ([a] -> [a]) -> [a] -> [Maybe Int]
+rank order ins =
+  let sorted = order (sort ins)
+  in map (\x -> findIndex ((==) x) sorted) ins
 
 -- 1000 * 4 * (distance^1.06)/(time_minutes)
 scoreRun :: Run -> Integer
@@ -226,7 +254,7 @@ dataTableHeader :: H.Html
 dataTableHeader =
   H.thead $ H.tr $ do
     mconcat $ map (H.td . H.b)
-      [ "Date", "Dist", "Time", "Incline", "Pace", "MpH", "Rest", "Score", "Comment", "Edit" ]
+      [ "Date", "Dist", "Time", "Incline", "Pace", "MpH", "Rest", "Score", "Score Rank", "Pace Rank", "Comment", "Edit" ]
 
 dataTableRow :: (Run, RunMeta) -> H.Html
 dataTableRow (r,meta) = H.tr $ do
@@ -238,6 +266,8 @@ dataTableRow (r,meta) = H.tr $ do
   H.td $ H.toHtml (printf "%.2f" (mph r) :: String)
   H.td $ H.toHtml $ show $ daysOff meta
   H.td $ H.toHtml $ show $ scoreRun r
+  H.td $ H.toHtml $ show $ scoreRank meta
+  H.td $ H.toHtml $ show $ paceRank meta
   H.td $ H.toHtml $ comment r
   H.td $ do
     "["
