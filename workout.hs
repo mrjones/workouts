@@ -28,8 +28,7 @@ import Text.Read (readMaybe)
 
 
 main:: IO()
-main = do
-  simpleHTTP nullConf $ allPages
+main = simpleHTTP nullConf $ allPages
 
 allPages :: ServerPartT IO Response
 allPages = do
