@@ -36,7 +36,7 @@ allPages = do
   decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
   msum [ mkTablePage
        , dropTablePage
-       , dumpDataPage
+       , runDataPage
        , editRunFormPage
        , newRunFormPage
        , handleMutateRunPage
@@ -98,8 +98,8 @@ scoreRun r =
   let time_minutes = (fromIntegral (duration r)) / 60
   in 1000 * 4 * ((distance r) ** (1.06)) / time_minutes
 
-dumpDataPage :: ServerPartT IO Response
-dumpDataPage = dir "dump" $ do
+runDataPage :: ServerPartT IO Response
+runDataPage = dir "rundata" $ do
   conn <- liftIO dbConnect
   runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs ORDER BY date ASC" ()
   ok (toResponse (dataTableHtml (annotate runs)))
@@ -132,7 +132,7 @@ handleMutateRunPage = dir "handlemutaterun" $ do
   conn <- liftIO dbConnect
   n <- liftIO $ storeRun conn run mutationKind
   case n of
-    1 -> seeOther ("/dump" :: String) (toResponse ("Redirecting to run list" :: String))
+    1 -> seeOther ("/rundata" :: String) (toResponse ("Redirecting to run list" :: String))
     0 -> ok $ toResponse $ simpleMessageHtml "error"
 
 parseRun :: String -> String -> String -> String -> String -> String -> Maybe Run
@@ -167,20 +167,25 @@ parseDate input = do
 
 -- TODO(mrjones): push the maybes up to a higher level
 storeRun :: Connection -> Maybe Run -> Maybe MutationKind -> IO Int64
-storeRun conn mr mkind =
-  case mkind of
-    Just kind -> case kind of
-      Create -> case mr of
-        Just r -> execute conn "INSERT INTO happstack.runs (date, miles, duration_sec, incline, comment) VALUES (?, ?, ?, ?, ?)"
-                  (date r, distance r, duration r, incline r, comment r)
-        Nothing -> return 0
-      Modify -> case mr of
-        Just r -> execute conn "UPDATE happstack.runs SET date=?, miles=?, duration_sec=?, incline=?, comment=? WHERE id=?" (date r, distance r, duration r, incline r, comment r, runid r)
-        Nothing -> return 0
-      Delete -> case mr of
-        Just r -> execute conn "DELETE FROM happstack.runs WHERE id = (?)" [runid r]
-        Nothing -> return 0
+storeRun conn mrun mkind =
+  case mrun of
+    Just run -> case mkind of
+      Just kind -> storeRun2 conn run kind
+      Nothing -> return 0
     Nothing -> return 0
+
+storeRun2 :: Connection -> Run -> MutationKind -> IO Int64
+storeRun2 conn r kind =
+    case kind of
+      Create -> execute conn
+                "INSERT INTO happstack.runs (date, miles, duration_sec, incline, comment) VALUES (?, ?, ?, ?, ?)"
+                (date r, distance r, duration r, incline r, comment r)
+      Modify -> execute conn
+                "UPDATE happstack.runs SET date=?, miles=?, duration_sec=?, incline=?, comment=? WHERE id=?"
+                (date r, distance r, duration r, incline r, comment r, runid r)
+      Delete -> execute conn
+                "DELETE FROM happstack.runs WHERE id = (?)"
+                [runid r]
 
 ---------
 
