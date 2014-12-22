@@ -332,9 +332,6 @@ runDataHtml run today mutationKind =
     H.body $ do
       H.form ! A.method "post" ! A.action "/handlemutaterun" $ do
         H.input ! A.type_ "hidden"
-                ! A.name "mutation_kind"
-                ! A.value (toValue (show mutationKind))
-        H.input ! A.type_ "hidden"
                 ! A.name "id"
                 ! A.value (case run of
                               Just r -> toValue (show (runid r))
