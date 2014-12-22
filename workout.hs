@@ -17,7 +17,7 @@ import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, local
 import Database.MySQL.Simple
 import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
-import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther)
+import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir)
 import System.Locale (defaultTimeLocale)
 import Text.Blaze (toValue)
 import Text.Blaze.Html5 ((!))
@@ -30,6 +30,28 @@ import Text.Read (readMaybe)
 main:: IO()
 main = simpleHTTP nullConf $ allPages
 
+--
+-- Data types
+--
+
+data RunMeta = RunMeta { daysOff :: Integer
+                       , scoreRank :: Int
+                       , paceRank :: Int }
+
+data Run = Run { distance :: Float
+               , duration :: Int
+               , date :: Day
+               , incline :: Float
+               , comment :: String
+               , runid :: Int
+               } deriving (Show)
+
+data MutationKind = Create | Modify | Delete deriving (Read, Show)
+
+--
+-- Routing / handlers
+--
+
 allPages :: ServerPartT IO Response
 allPages = do
   decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
@@ -39,7 +61,13 @@ allPages = do
        , editRunFormPage
        , newRunFormPage
        , handleMutateRunPage
+       , landingPage
        ]
+
+landingPage :: ServerPartT IO Response
+landingPage = do
+  nullDir
+  ok $ toResponse $ landingPageHtml
 
 mkTablePage :: ServerPartT IO Response
 mkTablePage = dir "admin" $ dir "mktable" $ do
@@ -51,9 +79,46 @@ dropTablePage = dir "admin" $ dir "droptable" $ do
   i <- liftIO dropTable
   ok (toResponse (executeSqlHtml "drop table" i))
 
-data RunMeta = RunMeta { daysOff :: Integer
-                       , scoreRank :: Int
-                       , paceRank :: Int }
+runDataPage :: ServerPartT IO Response
+runDataPage = dir "rundata" $ do
+  conn <- liftIO dbConnect
+  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs ORDER BY date ASC" ()
+  ok (toResponse (dataTableHtml (annotate runs)))
+
+newRunFormPage :: ServerPartT IO Response
+newRunFormPage = dir "newrun" $ do
+  tz <- liftIO $ getCurrentTimeZone
+  utcNow <- liftIO $ getCurrentTime
+  today <- return $ localDay $ utcToLocalTime tz utcNow
+  ok $ toResponse $ runDataHtml Nothing today Create
+
+editRunFormPage :: ServerPartT IO Response
+editRunFormPage = dir "editrun" $ do
+  id <- queryString $ look "id"
+  conn <- liftIO dbConnect
+  runs <- liftIO $ (query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs WHERE id = (?)" [id])
+  ok $ toResponse $ runDataHtml (Just (head runs)) (fromGregorian 2014 1 1) Modify
+
+handleMutateRunPage :: ServerPartT IO Response
+handleMutateRunPage = dir "handlemutaterun" $ do
+  mutationKindS <- body $ look "button"
+  distanceS <- body $ look "distance"
+  timeS <- body $ look "time"
+  dateS <- body $ look "date"
+  inclineS <- body $ look "incline"
+  commentS <- body $ look "comment"
+  mutationKind <- return $ readMaybe mutationKindS
+  idS <- body $ look "id"
+  run <- return $ (parseRun distanceS timeS dateS inclineS commentS idS)
+  conn <- liftIO dbConnect
+  n <- liftIO $ storeRun conn run mutationKind
+  case n of
+    1 -> seeOther ("/rundata" :: String) (toResponse ("Redirecting to run list" :: String))
+    0 -> ok $ toResponse $ simpleMessageHtml "error"
+
+--
+-- Misc business logic
+--
 
 annotate :: [ Run ] -> [ (Run, RunMeta) ]
 annotate rs = zip rs (annotate2 rs)
@@ -97,43 +162,6 @@ scoreRun r =
   let time_minutes = (fromIntegral (duration r)) / 60
   in 1000 * 4 * ((distance r) ** (1.06)) / time_minutes
 
-runDataPage :: ServerPartT IO Response
-runDataPage = dir "rundata" $ do
-  conn <- liftIO dbConnect
-  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs ORDER BY date ASC" ()
-  ok (toResponse (dataTableHtml (annotate runs)))
-
-newRunFormPage :: ServerPartT IO Response
-newRunFormPage = dir "newrun" $ do
-  tz <- liftIO $ getCurrentTimeZone
-  utcNow <- liftIO $ getCurrentTime
-  today <- return $ localDay $ utcToLocalTime tz utcNow
-  ok $ toResponse $ runDataHtml Nothing today Create
-
-editRunFormPage :: ServerPartT IO Response
-editRunFormPage = dir "editrun" $ do
-  id <- queryString $ look "id"
-  conn <- liftIO dbConnect
-  runs <- liftIO $ (query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs WHERE id = (?)" [id])
-  ok $ toResponse $ runDataHtml (Just (head runs)) (fromGregorian 2014 1 1) Modify
-
-handleMutateRunPage :: ServerPartT IO Response
-handleMutateRunPage = dir "handlemutaterun" $ do
-  mutationKindS <- body $ look "button"
-  distanceS <- body $ look "distance"
-  timeS <- body $ look "time"
-  dateS <- body $ look "date"
-  inclineS <- body $ look "incline"
-  commentS <- body $ look "comment"
-  mutationKind <- return $ readMaybe mutationKindS
-  idS <- body $ look "id"
-  run <- return $ (parseRun distanceS timeS dateS inclineS commentS idS)
-  conn <- liftIO dbConnect
-  n <- liftIO $ storeRun conn run mutationKind
-  case n of
-    1 -> seeOther ("/rundata" :: String) (toResponse ("Redirecting to run list" :: String))
-    0 -> ok $ toResponse $ simpleMessageHtml "error"
-
 parseRun :: String -> String -> String -> String -> String -> String -> Maybe Run
 parseRun distanceS durationS dateS inclineS commentS idS = do
   distance <- readMaybe distanceS :: Maybe Float
@@ -164,6 +192,18 @@ parseDate input = do
       fromGregorianValid year month day
     _ -> Nothing
 
+formatTimeForInput :: FormatTime t => t -> String
+formatTimeForInput time = formatTime defaultTimeLocale "%Y-%m-%d" time
+
+pace :: Run -> Float
+pace r = (fromIntegral (duration r)) / (distance r)
+
+mph :: Run -> Float
+mph r = 60 * 60 * (distance r) / (fromIntegral (duration r))
+
+printDuration :: Int -> String
+printDuration secs = printf "%d:%02d" (div secs 60) (mod secs 60)
+
 -- TODO(mrjones): push the maybes up to a higher level
 storeRun :: Connection -> Maybe Run -> Maybe MutationKind -> IO Int64
 storeRun conn mrun mkind =
@@ -172,6 +212,21 @@ storeRun conn mrun mkind =
       Just kind -> storeRun2 conn run kind
       Nothing -> return 0
     Nothing -> return 0
+
+--
+-- Database logic
+--
+
+dbConnect :: IO Connection
+dbConnect = connect defaultConnectInfo
+    { connectUser = "happstack"
+    , connectPassword = "happstack"
+    , connectDatabase = "happstack"
+    }
+
+instance QueryResults Run where
+  convertResults [f_dist,f_dur,f_date,f_incl,f_comm,f_id] [v_dist,v_dur,v_date,v_incl,v_comm,v_id] =
+    Run (convert f_dist v_dist) (convert f_dur v_dur) (convert f_date v_date) (convert f_incl v_incl) (convert f_comm v_comm) (convert f_id v_id)
 
 storeRun2 :: Connection -> Run -> MutationKind -> IO Int64
 storeRun2 conn r kind =
@@ -186,23 +241,88 @@ storeRun2 conn r kind =
                 "DELETE FROM happstack.runs WHERE id = (?)"
                 [runid r]
 
----------
+--
+-- Database Admin
+--
 
-data Run = Run { distance :: Float
-               , duration :: Int
-               , date :: Day
-               , incline :: Float
-               , comment :: String
-               , runid :: Int
-               } deriving (Show)
+dropTable :: IO Int64
+dropTable = do
+  conn <- dbConnect
+  execute conn "DROP TABLE happstack.runs" ()
 
-instance QueryResults Run where
-  convertResults [f_dist,f_dur,f_date,f_incl,f_comm,f_id] [v_dist,v_dur,v_date,v_incl,v_comm,v_id] =
-    Run (convert f_dist v_dist) (convert f_dur v_dur) (convert f_date v_date) (convert f_incl v_incl) (convert f_comm v_comm) (convert f_id v_id)
+mkTable :: IO Int64
+mkTable = do
+  conn <- dbConnect
+  execute conn "CREATE TABLE happstack.runs (\
+               \ id INT NOT NULL AUTO_INCREMENT,\
+               \ date DATE,\
+               \ miles DECIMAL(5,2),\
+               \ duration_sec INT,\
+               \ incline DECIMAL(2,1),\
+               \ comment VARCHAR(255),\
+               \ PRIMARY KEY (id))" ()
+--
+-- HTML Templates
+--
+  
+executeSqlHtml :: String -> Int64 -> H.Html
+executeSqlHtml opname _ =
+  H.html $ do
+    H.head $ do
+      H.title $ "executed database op"
+    H.body $ H.toHtml opname
 
----------
+simpleMessageHtml :: String -> H.Html
+simpleMessageHtml msg =
+  H.html $ do
+    H.head $ do
+      H.title $ "Hello, world!"
+    H.body $ do
+      H.toHtml msg
 
-data MutationKind = Create | Modify | Delete deriving (Read, Show)
+landingPageHtml :: H.Html
+landingPageHtml =
+  H.html $ do
+    H.head $ do
+      H.title $ "Workout Database"
+    H.body $ do
+      H.div $ H.a ! A.href "/newrun" $ H.html "New run"
+      H.div $ H.a ! A.href "/rundata" $ H.html "View runs"
+
+dataTableHtml :: [ (Run, RunMeta) ] -> H.Html
+dataTableHtml rs =
+  H.html $ do
+    H.head $ do
+      H.title $ "Data"
+    H.body $ do
+      H.table $ do
+        dataTableHeader
+        mapM_ dataTableRow rs
+      H.a ! A.href "/newrun" $ "New run"
+
+dataTableHeader :: H.Html
+dataTableHeader =
+  H.thead $ H.tr $ do
+    mconcat $ map (H.td . H.b)
+      [ "Date", "Dist", "Time", "Incline", "Pace", "MpH", "Rest", "Score", "Score Rank", "Pace Rank", "Comment", "Edit" ]
+
+dataTableRow :: (Run, RunMeta) -> H.Html
+dataTableRow (r,meta) = H.tr $ do
+  H.td $ H.toHtml $ show $ date r
+  H.td $ H.toHtml $ show $ distance r
+  H.td $ H.toHtml $ printDuration $ duration r
+  H.td $ H.toHtml $ show $ incline r
+  H.td $ H.toHtml $ printDuration $ round (pace r)
+  H.td $ H.toHtml (printf "%.2f" (mph r) :: String)
+  H.td $ H.toHtml $ show $ daysOff meta
+  H.td $ H.toHtml $ show $ round (scoreRun r)
+  H.td $ H.toHtml $ show $ scoreRank meta
+  H.td $ H.toHtml $ show $ paceRank meta
+  H.td $ H.toHtml $ comment r
+  H.td $ do
+    "["
+    H.a ! A.href (toValue ("/editrun?id=" ++ (show (runid r)))) $ "Edit"
+    "]"
 
 runDataHtml :: Maybe Run -> Day -> MutationKind -> H.Html
 runDataHtml run today mutationKind =
@@ -250,97 +370,3 @@ runDataFormRow mrun (name, id, formType, defaultValue, extractValue, extraAs) =
       H.label ! A.for (toValue id) $ H.toHtml name
     H.td $
       foldr (flip (!)) H.input (defaultAs ++ extraAs)
-
-formatTimeForInput :: FormatTime t => t -> String
-formatTimeForInput time = formatTime defaultTimeLocale "%Y-%m-%d" time
-
-dataTableHtml :: [ (Run, RunMeta) ] -> H.Html
-dataTableHtml rs =
-  H.html $ do
-    H.head $ do
-      H.title $ "Data"
-    H.body $ do
-      H.table $ do
-        dataTableHeader
-        mapM_ dataTableRow rs
-      H.a ! A.href "/newrun" $ "New run"
-
-dataTableHeader :: H.Html
-dataTableHeader =
-  H.thead $ H.tr $ do
-    mconcat $ map (H.td . H.b)
-      [ "Date", "Dist", "Time", "Incline", "Pace", "MpH", "Rest", "Score", "Score Rank", "Pace Rank", "Comment", "Edit" ]
-
-dataTableRow :: (Run, RunMeta) -> H.Html
-dataTableRow (r,meta) = H.tr $ do
-  H.td $ H.toHtml $ show $ date r
-  H.td $ H.toHtml $ show $ distance r
-  H.td $ H.toHtml $ printDuration $ duration r
-  H.td $ H.toHtml $ show $ incline r
-  H.td $ H.toHtml $ printDuration $ round (pace r)
-  H.td $ H.toHtml (printf "%.2f" (mph r) :: String)
-  H.td $ H.toHtml $ show $ daysOff meta
-  H.td $ H.toHtml $ show $ round (scoreRun r)
-  H.td $ H.toHtml $ show $ scoreRank meta
-  H.td $ H.toHtml $ show $ paceRank meta
-  H.td $ H.toHtml $ comment r
-  H.td $ do
-    "["
-    H.a ! A.href (toValue ("/editrun?id=" ++ (show (runid r)))) $ "Edit"
-    "]"
-
-pace :: Run -> Float
-pace r = (fromIntegral (duration r)) / (distance r)
-
-mph :: Run -> Float
-mph r = 60 * 60 * (distance r) / (fromIntegral (duration r))
-
-printDuration :: Int -> String
-printDuration secs = printf "%d:%02d" (div secs 60) (mod secs 60)
-
-dbConnect :: IO Connection
-dbConnect = connect defaultConnectInfo
-    { connectUser = "happstack"
-    , connectPassword = "happstack"
-    , connectDatabase = "happstack"
-    }
-
---
--- Database Admin
---
-
-dropTable :: IO Int64
-dropTable = do
-  conn <- dbConnect
-  execute conn "DROP TABLE happstack.runs" ()
-
-mkTable :: IO Int64
-mkTable = do
-  conn <- dbConnect
-  execute conn "CREATE TABLE happstack.runs (\
-               \ id INT NOT NULL AUTO_INCREMENT,\
-               \ date DATE,\
-               \ miles DECIMAL(5,2),\
-               \ duration_sec INT,\
-               \ incline DECIMAL(2,1),\
-               \ comment VARCHAR(255),\
-               \ PRIMARY KEY (id))" ()
---
--- HTML Templates
---
-  
-executeSqlHtml :: String -> Int64 -> H.Html
-executeSqlHtml opname _ =
-  H.html $ do
-    H.head $ do
-      H.title $ "executed database op"
-    H.body $ H.toHtml opname
-
-simpleMessageHtml :: String -> H.Html
-simpleMessageHtml msg =
-  H.html $ do
-    H.head $ do
-      H.title $ "Hello, world!"
-    H.body $ do
-      H.toHtml msg
-
