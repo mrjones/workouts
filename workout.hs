@@ -120,10 +120,10 @@ handleMutateRunPage = dir "handlemutaterun" $ do
 -- Misc business logic
 --
 
-annotate :: [ Run ] -> [ (Run, RunMeta) ]
+annotate :: [Run] -> [(Run, RunMeta)]
 annotate rs = zip rs (annotate2 rs)
 
-annotate2 :: [ Run ] -> [ RunMeta ]
+annotate2 :: [Run] -> [RunMeta]
 annotate2 rs = map buildMeta
                (zip3
                 (computeRest (map date rs))
@@ -140,9 +140,9 @@ buildMeta (rest, mscore, mpace) =
         Nothing -> 0
   in RunMeta rest score pace
 
-computeRest :: [ Day ] -> [ Integer ]
+computeRest :: [Day] -> [Integer]
 computeRest ds =
-  let shifted = take (length ds) ((head ds):ds) :: [ Day ]
+  let shifted = take (length ds) ((head ds):ds) :: [Day]
   in map (uncurry diffDays) (zip ds shifted)
 
 rankAsc :: Ord a => [a] -> [Maybe Int]
@@ -289,7 +289,7 @@ landingPageHtml =
       H.div $ H.a ! A.href "/newrun" $ H.html "New run"
       H.div $ H.a ! A.href "/rundata" $ H.html "View runs"
 
-dataTableHtml :: [ (Run, RunMeta) ] -> H.Html
+dataTableHtml :: [(Run, RunMeta)] -> H.Html
 dataTableHtml rs =
   H.html $ do
     H.head $ do
@@ -304,7 +304,7 @@ dataTableHeader :: H.Html
 dataTableHeader =
   H.thead $ H.tr $ do
     mconcat $ map (H.td . H.b)
-      [ "Date", "Dist", "Time", "Incline", "Pace", "MpH", "Rest", "Score", "Score Rank", "Pace Rank", "Comment", "Edit" ]
+      ["Date", "Dist", "Time", "Incline", "Pace", "MpH", "Rest", "Score", "Score Rank", "Pace Rank", "Comment", "Edit"]
 
 dataTableRow :: (Run, RunMeta) -> H.Html
 dataTableRow (r,meta) = H.tr $ do
