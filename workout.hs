@@ -31,7 +31,7 @@ import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, local
 import Database.MySQL.Simple
 import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
-import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir, mkCookie, addCookie, readCookieValue, CookieLife(Session), lookCookieValue)
+import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir, mkCookie, addCookie, readCookieValue, CookieLife(Session), lookCookieValue, expireCookie)
 --import Network.HTTP.Conduit (parseUrl, newManager, httpLbs, method, conduitManagerSettings)
 import Network.Wreq (post, responseBody, FormParam((:=)))
 import System.Environment (getArgs)
@@ -100,9 +100,15 @@ allPages googleClientId googleClientSecret = do
        , newRunFormPage
        , handleMutateRunPage
        , handleLoginPage googleClientId googleClientSecret
-       , landingPage googleClientId
+       , logoutPage
        , isLoggedInPage
+       , landingPage googleClientId
        ]
+
+logoutPage :: ServerPartT IO Response
+logoutPage = dir "logout" $ do
+  expireCookie "userid"
+  seeOther ("/" :: String) $ toResponse ("Logging out..." :: String)
 
 isLoggedInPage :: ServerPartT IO Response
 isLoggedInPage = dir "isloggedin" $ do
@@ -120,7 +126,7 @@ handleLoginPage clientid secret = dir "handlelogin" $ do
       case mu of
         Nothing -> ok $ toResponse $ simpleMessageHtml "user <-> db failed"
         Just u -> do addCookie Session (mkCookie "userid" (show $ userId u))
-                     ok $ toResponse $ simpleMessageHtml (show u)
+                     seeOther ("/" :: String) $ toResponse ("Logging in..." :: String)
 
 landingPage :: String -> ServerPartT IO Response
 landingPage googleClientId =
@@ -475,13 +481,13 @@ landingPageHtml googleUrl muser =
   H.html $ do
     H.head $ do
       H.title $ "Workout Database"
-    H.body $ do
-      H.div $ H.toHtml $ case muser of
-        Just user -> userName user
-        Nothing -> "Not logged in"
-      H.div $ H.a ! A.href (toValue googleUrl) $ "Login"
-      H.div $ H.a ! A.href "/newrun" $ H.html "New run"
-      H.div $ H.a ! A.href "/rundata" $ H.html "View runs"
+    H.body $ case muser of
+        Just user -> do
+          H.div $ H.toHtml $ userName user
+          H.div $ H.a ! A.href "/newrun" $ H.html "New run"
+          H.div $ H.a ! A.href "/rundata" $ H.html "View runs"
+          H.div $ H.a ! A.href "/logout" $ H.html "Logout"
+        Nothing -> H.div $ H.a ! A.href (toValue googleUrl) $ "Login"
 
 dataTableHtml :: [(Run, RunMeta)] -> H.Html
 dataTableHtml rs =
