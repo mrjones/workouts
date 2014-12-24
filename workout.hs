@@ -31,7 +31,7 @@ import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, local
 import Database.MySQL.Simple
 import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
-import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir)
+import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir, mkCookie, addCookie, readCookieValue, CookieLife(Session), lookCookieValue)
 --import Network.HTTP.Conduit (parseUrl, newManager, httpLbs, method, conduitManagerSettings)
 import Network.Wreq (post, responseBody, FormParam((:=)))
 import System.Environment (getArgs)
@@ -73,7 +73,7 @@ data Run = Run { distance :: Float
 data User = User { userId :: Int,
                    userName :: String,
                    userKind :: String,
-                   foreignUserId :: String } deriving (Show)
+                   foreignUserId :: String } deriving (Read, Show)
 
 data GoogleUser = GoogleUser { googleEmail :: String
                              , googleId :: String } deriving (Show)
@@ -101,22 +101,36 @@ allPages googleClientId googleClientSecret = do
        , handleMutateRunPage
        , handleLoginPage googleClientId googleClientSecret
        , landingPage googleClientId
+       , isLoggedInPage
        ]
+
+isLoggedInPage :: ServerPartT IO Response
+isLoggedInPage = dir "isloggedin" $ do
+  u <- readCookieValue "userid"
+  ok $ toResponse $ simpleMessageHtml (show (u :: Int))
 
 handleLoginPage :: String -> String -> ServerPartT IO Response
 handleLoginPage clientid secret = dir "handlelogin" $ do
   code <- look "code"
   mid <- liftIO $ getGoogleId clientid secret code
   case mid of
-    Just id -> do
-      u <- liftIO $ findOrInsertGoogleUser (displayName id) (uniqueId id)
-      ok $ toResponse $ simpleMessageHtml (show u)
     Nothing -> ok $ toResponse $ simpleMessageHtml "Login failed"
+    Just id -> do
+      mu <- liftIO $ findOrInsertGoogleUser (displayName id) (uniqueId id)
+      case mu of
+        Nothing -> ok $ toResponse $ simpleMessageHtml "user <-> db failed"
+        Just u -> do addCookie Session (mkCookie "userid" (show $ userId u))
+                     ok $ toResponse $ simpleMessageHtml (show u)
 
 landingPage :: String -> ServerPartT IO Response
-landingPage googleClientId= do
-  nullDir
-  ok $ toResponse $ landingPageHtml (googleLoginUrl googleClientId "http://localhost:8000/handlelogin" "")
+landingPage googleClientId =
+  msum
+  [ do uid <- readCookieValue "userid"
+       conn <- liftIO $ dbConnect
+       mu <- liftIO $ findUserById conn uid
+       ok $ toResponse $ landingPageHtml (googleLoginUrl googleClientId "http://localhost:8000/handlelogin" "") mu
+  , ok $ toResponse $ landingPageHtml (googleLoginUrl googleClientId "http://localhost:8000/handlelogin" "") Nothing
+  ]
 
 refreshDbPage :: ServerPartT IO Response
 refreshDbPage = dir "admin" $ dir "refreshdb" $ do
@@ -244,10 +258,22 @@ findOrInsertGoogleUser email sub = do
     [] -> insertGoogleUser conn email sub
     -- TODO(mrjones): return an error if us?
     _ -> return (-1)
+  findGoogleUser conn sub
+
+findUserById :: Connection -> String -> IO (Maybe User)
+findUserById conn id = do
+  users <- query conn "SELECT id, display, kind, foreign_id FROM happstack.users WHERE id = (?)" [id]
+  case users of
+    [] -> return $ Nothing
+    (u:_) -> return $ Just u
+
+findGoogleUser :: Connection -> String -> IO (Maybe User)
+findGoogleUser conn sub = do
   users <- query conn "SELECT id, display, kind, foreign_id FROM happstack.users WHERE kind = 'google' AND foreign_id = (?)" [sub]
   case users of
     [] -> return $ Nothing
     (u:_) -> return $ Just u
+
 
 insertGoogleUser :: Connection -> String -> String -> IO Int64
 insertGoogleUser conn email sub = do
@@ -444,12 +470,15 @@ simpleMessageHtml msg =
     H.body $ do
       H.toHtml msg
 
-landingPageHtml :: String -> H.Html
-landingPageHtml googleUrl =
+landingPageHtml :: String -> Maybe User -> H.Html
+landingPageHtml googleUrl muser =
   H.html $ do
     H.head $ do
       H.title $ "Workout Database"
     H.body $ do
+      H.div $ H.toHtml $ case muser of
+        Just user -> userName user
+        Nothing -> "Not logged in"
       H.div $ H.a ! A.href (toValue googleUrl) $ "Login"
       H.div $ H.a ! A.href "/newrun" $ H.html "New run"
       H.div $ H.a ! A.href "/rundata" $ H.html "View runs"
