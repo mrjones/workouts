@@ -92,18 +92,20 @@ data Identity = Identity{ displayName :: String
 
 allPages :: String -> String -> ServerPartT IO Response
 allPages googleClientId googleClientSecret = do
-  decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
-  msum [ refreshDbPage
-       , mkDbPage
-       , runDataPage
-       , editRunFormPage
-       , newRunFormPage
-       , handleMutateRunPage
-       , handleLoginPage googleClientId googleClientSecret
-       , logoutPage
-       , isLoggedInPage
-       , landingPage googleClientId
-       ]
+  loginUrl <- return $ googleLoginUrl googleClientId "http://localhost:8000/handlelogin" ""
+  let checkLogin = (requireLogin loginUrl) in do
+    decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
+    msum [ refreshDbPage
+         , mkDbPage
+         , dir "rundata" $ checkLogin runDataPage
+         , dir "editrun" $ checkLogin editRunFormPage
+         , dir "newrun" $ checkLogin newRunFormPage
+         , dir "handlemutaterun" $ checkLogin handleMutateRunPage
+         , handleLoginPage googleClientId googleClientSecret
+         , logoutPage
+         , isLoggedInPage
+         , landingPage googleClientId
+         ]
 
 logoutPage :: ServerPartT IO Response
 logoutPage = dir "logout" $ do
@@ -129,6 +131,15 @@ handleLoginPage clientid secret = dir "handlelogin" $ do
         Just u -> do addCookie Session (mkCookie "userid" (show $ userId u))
                      seeOther ("/" :: String) $ toResponse ("Logging in..." :: String)
 
+requireLogin :: String -> ServerPartT IO Response -> ServerPartT IO Response
+requireLogin loginUrl page = msum
+ [ do uid <- readCookieValue "userid"
+      conn <- liftIO $ dbConnect
+      mu <- liftIO $ findUserById conn uid
+      page
+ , ok $ toResponse $ notLoggedInHtml loginUrl
+ ]
+
 landingPage :: String -> ServerPartT IO Response
 landingPage googleClientId =
   msum
@@ -153,27 +164,27 @@ mkDbPage = dir "admin" $ dir "mkdb" $ do
   ok (toResponse (executeSqlHtml "create table" (runs + users)))
 
 runDataPage :: ServerPartT IO Response
-runDataPage = dir "rundata" $ do
+runDataPage = do
   conn <- liftIO dbConnect
   runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs ORDER BY date ASC" ()
   ok (toResponse (dataTableHtml (annotate runs)))
 
 newRunFormPage :: ServerPartT IO Response
-newRunFormPage = dir "newrun" $ do
+newRunFormPage = do
   tz <- liftIO $ getCurrentTimeZone
   utcNow <- liftIO $ getCurrentTime
   today <- return $ localDay $ utcToLocalTime tz utcNow
   ok $ toResponse $ runDataHtml Nothing today Create
 
 editRunFormPage :: ServerPartT IO Response
-editRunFormPage = dir "editrun" $ do
+editRunFormPage = do
   id <- queryString $ look "id"
   conn <- liftIO dbConnect
   runs <- liftIO $ (query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs WHERE id = (?)" [id])
   ok $ toResponse $ runDataHtml (Just (head runs)) (fromGregorian 2014 1 1) Modify
 
 handleMutateRunPage :: ServerPartT IO Response
-handleMutateRunPage = dir "handlemutaterun" $ do
+handleMutateRunPage = do
   mutationKindS <- body $ look "button"
   distanceS <- body $ look "distance"
   timeS <- body $ look "time"
@@ -568,3 +579,11 @@ runDataFormRow mrun (name, id, formType, defaultValue, extractValue, extraAs) =
       H.label ! A.for (toValue id) $ H.toHtml name
     H.td $
       foldr (flip (!)) H.input (defaultAs ++ extraAs)
+
+notLoggedInHtml :: String -> H.Html
+notLoggedInHtml googleUrl =
+  H.html $ do
+    H.head $ do
+      H.title "Welcome!"
+    H.body $ do
+      H.div $ H.a ! A.href (toValue googleUrl) $ "Login"
