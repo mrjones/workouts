@@ -50,9 +50,13 @@ main = do
   args <- getArgs
   googleClientId <- return $ head args
   googleClientSecret <- return $ head $ tail args
+  adminKind <- return $ head $ tail $ tail args
+  adminId <- return $ head $ tail $ tail $ tail args
   putStrLn $ "Using google client id: " ++ googleClientId
   putStrLn $ "Using google client secret: " ++ googleClientSecret
-  simpleHTTP nullConf $ allPages googleClientId googleClientSecret
+  putStrLn $ "Using admin kind: " ++ adminKind
+  putStrLn $ "Using admin id: " ++ adminId
+  simpleHTTP nullConf $ allPages googleClientId googleClientSecret adminKind adminId
 
 --
 -- Data types
@@ -90,13 +94,13 @@ data Identity = Identity{ displayName :: String
 -- Routing / handlers
 --
 
-allPages :: String -> String -> ServerPartT IO Response
-allPages googleClientId googleClientSecret = do
+allPages :: String -> String -> String -> String -> ServerPartT IO Response
+allPages googleClientId googleClientSecret adminKind adminId = do
   loginUrl <- return $ googleLoginUrl googleClientId "http://localhost:8000/handlelogin" ""
   let checkLogin = (requireLogin loginUrl) in do
     decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
-    msum [ refreshDbPage
-         , mkDbPage
+    msum [ dir "admin" $ dir "refreshdb" $ requireAdmin adminKind adminId refreshDbPage
+         , dir "admin" $ dir "mkdb" $ requireAdmin adminKind adminId mkDbPage
          , dir "rundata" $ checkLogin runDataPage
          , dir "editrun" $ checkLogin editRunFormPage
          , dir "newrun" $ checkLogin newRunFormPage
@@ -131,6 +135,21 @@ handleLoginPage clientid secret = do
         Just u -> do addCookie Session (mkCookie "userid" (show $ userId u))
                      seeOther ("/" :: String) $ toResponse ("Logging in..." :: String)
 
+requireAdmin :: String -> String -> ServerPartT IO Response -> ServerPartT IO Response
+requireAdmin adminKind adminId protectedPage = do
+  uid <- readCookieValue "userid"
+  liftIO $ putStrLn (show uid)
+  conn <- liftIO $ dbConnect
+  mu <- liftIO $ findUserById conn uid
+  liftIO $ putStrLn (show mu)
+  case mu of
+    Nothing -> ok $ toResponse $ simpleMessageHtml "NOT LOGGED IN"
+    Just u -> if ((adminKind == (userKind u)) &&
+                  (adminId == (foreignUserId u)))
+              then protectedPage
+              else ok $ toResponse $ simpleMessageHtml "NOT ADMIN"
+                        
+
 requireLogin :: String -> ServerPartT IO Response -> ServerPartT IO Response
 requireLogin loginUrl page = msum
  [ do uid <- readCookieValue "userid"
@@ -151,14 +170,14 @@ landingPage googleClientId =
   ]
 
 refreshDbPage :: ServerPartT IO Response
-refreshDbPage = dir "admin" $ dir "refreshdb" $ do
+refreshDbPage = do
   drop <- liftIO dropTable
   runs <- liftIO mkRunTable
   users <- liftIO mkUserTable
   ok (toResponse (executeSqlHtml "create table" (drop + runs + users)))
 
 mkDbPage :: ServerPartT IO Response
-mkDbPage = dir "admin" $ dir "mkdb" $ do
+mkDbPage = do
   runs <- liftIO mkRunTable
   users <- liftIO mkUserTable
   ok (toResponse (executeSqlHtml "create table" (runs + users)))
@@ -417,7 +436,7 @@ instance QueryResults GoogleUser where
 
 instance QueryResults User where
   convertResults [f_id, f_disp, f_kind, f_fid] [v_id, v_disp, v_kind, v_fid] =
-    User (convert f_id v_id) (convert f_disp v_disp) (convert f_kind v_kind) (convert f_fid v_id)
+    User (convert f_id v_id) (convert f_disp v_disp) (convert f_kind v_kind) (convert f_fid v_fid)
 
 storeRun2 :: Connection -> Run -> MutationKind -> IO Int64
 storeRun2 conn r kind =
