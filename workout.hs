@@ -125,6 +125,7 @@ handleLoginPage clientid secret = dir "handlelogin" $ do
       mu <- liftIO $ findOrInsertGoogleUser (displayName id) (uniqueId id)
       case mu of
         Nothing -> ok $ toResponse $ simpleMessageHtml "user <-> db failed"
+        -- TODO(mrjones): this is insanely insecure
         Just u -> do addCookie Session (mkCookie "userid" (show $ userId u))
                      seeOther ("/" :: String) $ toResponse ("Logging in..." :: String)
 
