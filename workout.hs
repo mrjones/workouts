@@ -72,6 +72,12 @@ data Run = Run { distance :: Float
 
 data MutationKind = Create | Modify | Delete deriving (Read, Show)
 
+data IdentityProvider = Google deriving (Show)
+
+data Identity = Identity{ displayName :: String
+                        , uniqueId :: String
+                        , provider :: IdentityProvider } deriving (Show)
+
 --
 -- Routing / handlers
 --
@@ -92,8 +98,10 @@ allPages googleClientId googleClientSecret = do
 handleLoginPage :: String -> String -> ServerPartT IO Response
 handleLoginPage clientid secret = dir "handlelogin" $ do
   code <- look "code"
-  id <- liftIO $ getGoogleId clientid secret code
-  ok $ toResponse $ simpleMessageHtml (code ++ " " ++ id)
+  mid <- liftIO $ getGoogleId clientid secret code
+  case mid of
+    Just id -> ok $ toResponse $ simpleMessageHtml ("You are loggd in as: " ++ (show id))
+    Nothing -> ok $ toResponse $ simpleMessageHtml "Login failed"
 
 landingPage :: String -> ServerPartT IO Response
 landingPage googleClientId= do
@@ -148,7 +156,7 @@ handleMutateRunPage = dir "handlemutaterun" $ do
     0 -> ok $ toResponse $ simpleMessageHtml "error"
 
 --
--- Misc business logic
+-- Google login flow
 --
 
 googleLoginUrl :: String -> String -> String -> String
@@ -157,11 +165,6 @@ googleLoginUrl clientid redirect state =
 
 getGoogleIdUrl :: String
 getGoogleIdUrl = "https://www.googleapis.com/oauth2/v3/token"
-
---getGoogleIdPostBody :: String -> String -> String -> IO String
---getGoogleIdPostBody clientid secret code =
---  printf "code=%s&client_id=%s&client_secret=%s&redirect_uri=%s&grant_type=authorization_code" code clientid secret "http://localhost:8000/handlelogin"
-
 
 data JWTHeader = JWTHeader { alg :: String, kid :: String } deriving (Show)
 
@@ -201,7 +204,7 @@ decodeToString :: Text.Text -> String
 decodeToString inTxt = 
   Text.unpack (TextEnc.decodeUtf8 (BS64.decodeLenient (TextEnc.encodeUtf8 inTxt)))
   
-getGoogleId :: String -> String -> String -> IO String
+getGoogleId :: String -> String -> String -> IO (Maybe Identity)
 getGoogleId clientid secret code = do
   r <- post getGoogleIdUrl [ "code" := code
                            , "client_id" := clientid
@@ -209,46 +212,23 @@ getGoogleId clientid secret code = do
                            , "redirect_uri" := ("http://localhost:8000/handlelogin" :: String)
                            , "grant_type" := ("authorization_code" :: String)
                            ]
---  return $ TL.unpack $ decodeUtf8 $ r ^. responseBody
---  encodedId <- return $ unpack $ r ^. responseBody . key "id_token" . _String
   putStrLn $ TL.unpack $ decodeUtf8 $ r ^. responseBody
   encodedIdTxt <- return $ r ^. responseBody .key "id_token" . _String
   putStrLn ("Decoding: "  ++ (show encodedIdTxt))
   elems <- return $ Text.splitOn "." encodedIdTxt
   putStrLn $ show elems
---  firstJsonTxt <- return $ (TextEnc.decodeUtf8 (BS64.decodeLenient (TextEnc.encodeUtf8 (head elems))))
---  firstJsonC8 <- return $ C8L.fromStrict (TextEnc.encodeUtf8 firstJsonTxt)
---  putStrLn $ ("c8: " ++ (show firstJsonC8))
---  firstJson <- return $ (JSON.decode firstJsonC8 :: Maybe Header)
---  putStrLn $ ("JSON" ++ (show firstJson))
   jwtHeader <- return $ (jwtDecode (head elems) :: Maybe JWTHeader)
   putStrLn $ show jwtHeader
   putStrLn $ "payload: " ++ (decodeToString (head (tail elems)))
   jwtPayload <- return $ (jwtDecode (head (tail elems)) :: Maybe JWTPayload)
   putStrLn $ show jwtPayload
   return $ case jwtPayload of
-    Nothing -> "ERROR couldn't parse payload"
-    Just payload -> email payload
+    Nothing -> Nothing
+    Just payload -> Just (Identity (email payload) (sub payload) Google)
 
-
---  encodedIdString <- return $ ( (Text.unpack $ r ^. responseBody . key "id_token" . _String) :: String )
---  encodedIdBS <- return $ (C8.pack encodedIdString :: C8.ByteString)
---  len <- return $ C8.length encodedIdBS
---  putStrLn $ show len
---  missingN <- return $ (4 - (mod len 4) - 1)
---  missingStr <- return $ take missingN (repeat '=')
---  paddedIdBS <- return (C8.append encodedIdBS (C8.pack missingStr))
---  putStrLn (C8.unpack paddedIdBS)
---  case (BS64.decode paddedIdBS) of
---    Left string -> return $ "ERROR: " ++ string
---    Right bytestring -> return $ C8.unpack bytestring
-
---  initReq <- parseUrl getGoogleIdUrl
---  manager <- newManager conduitManagerSettings
---  let request = initReq { method = "POST" } in
---    response <- httpLbs request manager
-      
-      
+--
+-- Misc application logic
+--
 
 annotate :: [Run] -> [(Run, RunMeta)]
 annotate rs = zip rs (annotate2 rs)
