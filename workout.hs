@@ -32,7 +32,6 @@ import Database.MySQL.Simple
 import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
 import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir, mkCookie, addCookie, readCookieValue, CookieLife(Session), lookCookieValue, expireCookie)
---import Network.HTTP.Conduit (parseUrl, newManager, httpLbs, method, conduitManagerSettings)
 import Network.Wreq (post, responseBody, FormParam((:=)))
 import System.Environment (getArgs)
 import System.Locale (defaultTimeLocale)
