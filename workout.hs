@@ -101,14 +101,14 @@ allPages googleClientId googleClientSecret = do
          , dir "editrun" $ checkLogin editRunFormPage
          , dir "newrun" $ checkLogin newRunFormPage
          , dir "handlemutaterun" $ checkLogin handleMutateRunPage
-         , handleLoginPage googleClientId googleClientSecret
-         , logoutPage
+         , dir "handlelogin" $ handleLoginPage googleClientId googleClientSecret
+         , dir "logout" $ logoutPage
          , isLoggedInPage
          , landingPage googleClientId
          ]
 
 logoutPage :: ServerPartT IO Response
-logoutPage = dir "logout" $ do
+logoutPage = do
   expireCookie "userid"
   seeOther ("/" :: String) $ toResponse ("Logging out..." :: String)
 
@@ -118,7 +118,7 @@ isLoggedInPage = dir "isloggedin" $ do
   ok $ toResponse $ simpleMessageHtml (show (u :: Int))
 
 handleLoginPage :: String -> String -> ServerPartT IO Response
-handleLoginPage clientid secret = dir "handlelogin" $ do
+handleLoginPage clientid secret = do
   code <- look "code"
   mid <- liftIO $ getGoogleId clientid secret code
   case mid of
