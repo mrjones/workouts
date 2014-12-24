@@ -18,6 +18,7 @@ import Database.MySQL.Simple
 import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
 import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir)
+import System.Environment (getArgs)
 import System.Locale (defaultTimeLocale)
 import Text.Blaze (toValue)
 import Text.Blaze.Html5 ((!))
@@ -28,7 +29,11 @@ import Text.Read (readMaybe)
 
 
 main:: IO()
-main = simpleHTTP nullConf $ allPages
+main = do
+  args <- getArgs
+  googleClientId <- return $ head args
+  putStrLn $ "Using google client id: " ++ googleClientId
+  simpleHTTP nullConf $ allPages googleClientId
 
 --
 -- Data types
@@ -52,8 +57,8 @@ data MutationKind = Create | Modify | Delete deriving (Read, Show)
 -- Routing / handlers
 --
 
-allPages :: ServerPartT IO Response
-allPages = do
+allPages :: String -> ServerPartT IO Response
+allPages googleClientId = do
   decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
   msum [ mkTablePage
        , dropTablePage
@@ -61,13 +66,18 @@ allPages = do
        , editRunFormPage
        , newRunFormPage
        , handleMutateRunPage
-       , landingPage
+       , handleLoginPage
+       , landingPage googleClientId
        ]
 
-landingPage :: ServerPartT IO Response
-landingPage = do
+handleLoginPage :: ServerPartT IO Response
+handleLoginPage = dir "handlelogin" $ do
+  ok $ toResponse $ simpleMessageHtml "logging in..."
+
+landingPage :: String -> ServerPartT IO Response
+landingPage googleClientId= do
   nullDir
-  ok $ toResponse $ landingPageHtml
+  ok $ toResponse $ landingPageHtml (googleLoginUrl googleClientId "http://localhost:8000/handlelogin" "")
 
 mkTablePage :: ServerPartT IO Response
 mkTablePage = dir "admin" $ dir "mktable" $ do
@@ -119,6 +129,10 @@ handleMutateRunPage = dir "handlemutaterun" $ do
 --
 -- Misc business logic
 --
+
+googleLoginUrl :: String -> String -> String -> String
+googleLoginUrl clientid redirect state =
+  printf "https://accounts.google.com/o/oauth2/auth?client_id=%s&response_type=code&scope=openid%%20email&redirect_uri=%s&state=%s" clientid redirect state
 
 annotate :: [Run] -> [(Run, RunMeta)]
 annotate rs = zip rs (annotate2 rs)
@@ -280,12 +294,13 @@ simpleMessageHtml msg =
     H.body $ do
       H.toHtml msg
 
-landingPageHtml :: H.Html
-landingPageHtml =
+landingPageHtml :: String -> H.Html
+landingPageHtml googleUrl =
   H.html $ do
     H.head $ do
       H.title $ "Workout Database"
     H.body $ do
+      H.div $ H.a ! A.href (toValue googleUrl) $ "Login"
       H.div $ H.a ! A.href "/newrun" $ H.html "New run"
       H.div $ H.a ! A.href "/rundata" $ H.html "View runs"
 
