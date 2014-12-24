@@ -4,15 +4,26 @@
 -- cabal install mysql-simple
 -- cabal install happstack
 -- cabal install wreq
+-- cabal install jwt
 
-import Control.Lens ((^.))
-import Control.Monad (msum)
+import Control.Applicative ((<$>), (<*>))
+import Control.Lens ((^.), (^..))
+import Control.Monad (msum,mzero)
 import Control.Monad.IO.Class (liftIO)
+import Data.Aeson ((.:))
+import Data.Aeson hiding (decode)
+import qualified Data.Aeson as JSON (decode, FromJSON(..), Object(..))
+import Data.Aeson.Lens (key, _String, values)
+import qualified Data.ByteString.Char8 as C8 (pack,unpack,ByteString,length,append)
+import qualified Data.ByteString.Lazy.Char8 as C8L (fromStrict)
 import qualified Data.ByteString as BS (unpack)
+import qualified Data.ByteString.Base64 as BS64 (decode, decodeLenient)
 import Data.Int (Int64)
 import Data.List (reverse, sort, findIndex)
 import Data.Monoid (mconcat)
-import Data.Text (splitOn, pack, unpack)
+import qualified Data.Text as Text (splitOn, pack, unpack, Text)
+import qualified Data.Text.Lazy as TL (unpack)
+import qualified Data.Text.Encoding as TextEnc (encodeUtf8, decodeUtf8)
 import Data.Time.Calendar (Day, fromGregorianValid, fromGregorian, diffDays)
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (formatTime, FormatTime)
@@ -29,11 +40,10 @@ import Text.Blaze (toValue)
 import Text.Blaze.Html5 ((!))
 import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
-import qualified Data.Text.Lazy as TL (unpack)
-import Data.Text.Lazy.Encoding (decodeUtf8)
+import Data.Text.Lazy.Encoding (encodeUtf8, decodeUtf8)
 import Text.Printf (printf)
 import Text.Read (readMaybe)
-
+import Web.JWT (decode, claims, header, signature)
 
 main:: IO()
 main = do
@@ -152,6 +162,45 @@ getGoogleIdUrl = "https://www.googleapis.com/oauth2/v3/token"
 --getGoogleIdPostBody clientid secret code =
 --  printf "code=%s&client_id=%s&client_secret=%s&redirect_uri=%s&grant_type=authorization_code" code clientid secret "http://localhost:8000/handlelogin"
 
+
+data JWTHeader = JWTHeader { alg :: String, kid :: String } deriving (Show)
+
+instance JSON.FromJSON JWTHeader where
+  parseJSON (Object o) = JWTHeader <$>
+                              o .: "alg" <*>
+                              o .: "kid"
+  parseJSON _ = mzero
+
+data JWTPayload = JWTPayload { iss :: String
+                             , at_has :: String
+                             , email_verified :: Bool
+                             , sub :: String
+                             , azp :: String
+                             , email :: String
+                             , aud :: String
+                             , iat :: Int
+                             , exp :: Int } deriving (Show)
+
+instance JSON.FromJSON JWTPayload where
+  parseJSON (Object o) = JWTPayload <$>
+                         o .: "iss" <*>
+                         o .: "at_hash" <*>
+                         o .: "email_verified" <*>
+                         o .: "sub" <*>
+                         o .: "azp" <*>
+                         o .: "email" <*>
+                         o .: "aud" <*>
+                         o .: "iat" <*>
+                         o .: "exp"
+
+jwtDecode :: FromJSON a => Text.Text -> Maybe a
+jwtDecode inTxt =
+  JSON.decode (C8L.fromStrict (BS64.decodeLenient (TextEnc.encodeUtf8 inTxt)))
+
+decodeToString :: Text.Text -> String
+decodeToString inTxt = 
+  Text.unpack (TextEnc.decodeUtf8 (BS64.decodeLenient (TextEnc.encodeUtf8 inTxt)))
+  
 getGoogleId :: String -> String -> String -> IO String
 getGoogleId clientid secret code = do
   r <- post getGoogleIdUrl [ "code" := code
@@ -160,7 +209,40 @@ getGoogleId clientid secret code = do
                            , "redirect_uri" := ("http://localhost:8000/handlelogin" :: String)
                            , "grant_type" := ("authorization_code" :: String)
                            ]
-  return $ TL.unpack $ decodeUtf8 $ r ^. responseBody
+--  return $ TL.unpack $ decodeUtf8 $ r ^. responseBody
+--  encodedId <- return $ unpack $ r ^. responseBody . key "id_token" . _String
+  putStrLn $ TL.unpack $ decodeUtf8 $ r ^. responseBody
+  encodedIdTxt <- return $ r ^. responseBody .key "id_token" . _String
+  putStrLn ("Decoding: "  ++ (show encodedIdTxt))
+  elems <- return $ Text.splitOn "." encodedIdTxt
+  putStrLn $ show elems
+--  firstJsonTxt <- return $ (TextEnc.decodeUtf8 (BS64.decodeLenient (TextEnc.encodeUtf8 (head elems))))
+--  firstJsonC8 <- return $ C8L.fromStrict (TextEnc.encodeUtf8 firstJsonTxt)
+--  putStrLn $ ("c8: " ++ (show firstJsonC8))
+--  firstJson <- return $ (JSON.decode firstJsonC8 :: Maybe Header)
+--  putStrLn $ ("JSON" ++ (show firstJson))
+  jwtHeader <- return $ (jwtDecode (head elems) :: Maybe JWTHeader)
+  putStrLn $ show jwtHeader
+  putStrLn $ "payload: " ++ (decodeToString (head (tail elems)))
+  jwtPayload <- return $ (jwtDecode (head (tail elems)) :: Maybe JWTPayload)
+  putStrLn $ show jwtPayload
+  return $ case jwtPayload of
+    Nothing -> "ERROR couldn't parse payload"
+    Just payload -> email payload
+
+
+--  encodedIdString <- return $ ( (Text.unpack $ r ^. responseBody . key "id_token" . _String) :: String )
+--  encodedIdBS <- return $ (C8.pack encodedIdString :: C8.ByteString)
+--  len <- return $ C8.length encodedIdBS
+--  putStrLn $ show len
+--  missingN <- return $ (4 - (mod len 4) - 1)
+--  missingStr <- return $ take missingN (repeat '=')
+--  paddedIdBS <- return (C8.append encodedIdBS (C8.pack missingStr))
+--  putStrLn (C8.unpack paddedIdBS)
+--  case (BS64.decode paddedIdBS) of
+--    Left string -> return $ "ERROR: " ++ string
+--    Right bytestring -> return $ C8.unpack bytestring
+
 --  initReq <- parseUrl getGoogleIdUrl
 --  manager <- newManager conduitManagerSettings
 --  let request = initReq { method = "POST" } in
@@ -221,22 +303,22 @@ parseRun distanceS durationS dateS inclineS commentS idS = do
 
 parseDuration :: String -> Maybe Int
 parseDuration input = do
-  parts <- Just (splitOn (pack ":") (pack input))
+  parts <- Just (Text.splitOn (Text.pack ":") (Text.pack input))
   case parts of
     [minS,secS] -> do
-      min <- readMaybe (unpack minS) :: Maybe Int
-      sec <- readMaybe (unpack secS) :: Maybe Int
+      min <- readMaybe (Text.unpack minS) :: Maybe Int
+      sec <- readMaybe (Text.unpack secS) :: Maybe Int
       Just (min * 60 + sec)
     _ -> Nothing
 
 parseDate :: String -> Maybe Day
 parseDate input = do
-  parts <- Just (splitOn (pack "-") (pack input))
+  parts <- Just (Text.splitOn (Text.pack "-") (Text.pack input))
   case parts of
     [yearS,monthS,dayS] -> do
-      year <- readMaybe (unpack yearS) :: Maybe Integer
-      month <- readMaybe (unpack monthS) :: Maybe Int
-      day <- readMaybe (unpack dayS) :: Maybe Int
+      year <- readMaybe (Text.unpack yearS) :: Maybe Integer
+      month <- readMaybe (Text.unpack monthS) :: Maybe Int
+      day <- readMaybe (Text.unpack dayS) :: Maybe Int
       fromGregorianValid year month day
     _ -> Nothing
 
