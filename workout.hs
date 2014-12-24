@@ -70,6 +70,14 @@ data Run = Run { distance :: Float
                , runid :: Int
                } deriving (Show)
 
+data User = User { userId :: Int,
+                   userName :: String,
+                   userKind :: String,
+                   foreignUserId :: String } deriving (Show)
+
+data GoogleUser = GoogleUser { googleEmail :: String
+                             , googleId :: String } deriving (Show)
+
 data MutationKind = Create | Modify | Delete deriving (Read, Show)
 
 data IdentityProvider = Google deriving (Show)
@@ -86,6 +94,7 @@ allPages :: String -> String -> ServerPartT IO Response
 allPages googleClientId googleClientSecret = do
   decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
   msum [ refreshDbPage
+       , mkDbPage
        , runDataPage
        , editRunFormPage
        , newRunFormPage
@@ -99,7 +108,9 @@ handleLoginPage clientid secret = dir "handlelogin" $ do
   code <- look "code"
   mid <- liftIO $ getGoogleId clientid secret code
   case mid of
-    Just id -> ok $ toResponse $ simpleMessageHtml ("You are loggd in as: " ++ (show id))
+    Just id -> do
+      u <- liftIO $ findOrInsertGoogleUser (displayName id) (uniqueId id)
+      ok $ toResponse $ simpleMessageHtml (show u)
     Nothing -> ok $ toResponse $ simpleMessageHtml "Login failed"
 
 landingPage :: String -> ServerPartT IO Response
@@ -113,6 +124,12 @@ refreshDbPage = dir "admin" $ dir "refreshdb" $ do
   runs <- liftIO mkRunTable
   users <- liftIO mkUserTable
   ok (toResponse (executeSqlHtml "create table" (drop + runs + users)))
+
+mkDbPage :: ServerPartT IO Response
+mkDbPage = dir "admin" $ dir "mkdb" $ do
+  runs <- liftIO mkRunTable
+  users <- liftIO mkUserTable
+  ok (toResponse (executeSqlHtml "create table" (runs + users)))
 
 runDataPage :: ServerPartT IO Response
 runDataPage = dir "rundata" $ do
@@ -218,6 +235,25 @@ getGoogleId clientid secret code = do
   return $ case jwtPayload of
     Nothing -> Nothing
     Just payload -> Just (Identity (email payload) (sub payload) Google)
+
+findOrInsertGoogleUser :: String -> String -> IO (Maybe User)
+findOrInsertGoogleUser email sub = do
+  conn <- dbConnect
+  googleUsers <- query conn "SELECT google_email, google_id FROM happstack.google_users WHERE google_id = (?)" [sub] :: IO [GoogleUser]
+  case googleUsers :: [GoogleUser] of
+    [] -> insertGoogleUser conn email sub
+    -- TODO(mrjones): return an error if us?
+    _ -> return (-1)
+  users <- query conn "SELECT id, display, kind, foreign_id FROM happstack.users WHERE kind = 'google' AND foreign_id = (?)" [sub]
+  case users of
+    [] -> return $ Nothing
+    (u:_) -> return $ Just u
+
+insertGoogleUser :: Connection -> String -> String -> IO Int64
+insertGoogleUser conn email sub = do
+  n <- execute conn "INSERT INTO happstack.google_users (google_email, google_id) VALUES (?, ?)" (email, sub)
+  case n of
+    1 -> execute conn "INSERT INTO happstack.users (display, kind, foreign_id) VALUES (?, 'google', ?)" (email, sub)
 
 --
 -- Misc application logic
@@ -331,6 +367,14 @@ instance QueryResults Run where
   convertResults [f_dist,f_dur,f_date,f_incl,f_comm,f_id] [v_dist,v_dur,v_date,v_incl,v_comm,v_id] =
     Run (convert f_dist v_dist) (convert f_dur v_dur) (convert f_date v_date) (convert f_incl v_incl) (convert f_comm v_comm) (convert f_id v_id)
 
+instance QueryResults GoogleUser where
+  convertResults [f_gemail, f_gid] [v_gemail, v_gid] =
+    GoogleUser (convert f_gemail v_gemail) (convert f_gid v_gid)
+
+instance QueryResults User where
+  convertResults [f_id, f_disp, f_kind, f_fid] [v_id, v_disp, v_kind, v_fid] =
+    User (convert f_id v_id) (convert f_disp v_disp) (convert f_kind v_kind) (convert f_fid v_id)
+
 storeRun2 :: Connection -> Run -> MutationKind -> IO Int64
 storeRun2 conn r kind =
     case kind of
@@ -352,15 +396,21 @@ dropTable :: IO Int64
 dropTable = do
   conn <- dbConnect
   execute conn "DROP TABLE happstack.runs" ()
+  execute conn "DROP TABLE happstack.google_users;" ()
+  execute conn "DROP TABLE happstack.users;" ()
 
 mkUserTable :: IO Int64
 mkUserTable = do
   conn <- dbConnect
+  execute conn "CREATE TABLE happstack.google_users (\
+               \ google_email VARCHAR(255),\
+               \ google_id VARCHAR(255),\
+               \ PRIMARY KEY (google_id))" ()
   execute conn "CREATE TABLE happstack.users (\
                \ id INT NOT NULL AUTO_INCREMENT,\
                \ display VARCHAR(255),\
-               \ google_email VARCHAR(255),\
-               \ google_id VARCHAR(255),\
+               \ kind VARCHAR(255),\
+               \ foreign_id VARCHAR(255),\
                \ PRIMARY KEY (id))" ()
 
 mkRunTable :: IO Int64
@@ -373,6 +423,7 @@ mkRunTable = do
                \ duration_sec INT,\
                \ incline DECIMAL(2,1),\
                \ comment VARCHAR(255),\
+               \ user_id INT, \
                \ PRIMARY KEY (id))" ()
 --
 -- HTML Templates
