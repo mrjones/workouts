@@ -85,8 +85,7 @@ data Identity = Identity{ displayName :: String
 allPages :: String -> String -> ServerPartT IO Response
 allPages googleClientId googleClientSecret = do
   decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
-  msum [ mkTablePage
-       , dropTablePage
+  msum [ refreshDbPage
        , runDataPage
        , editRunFormPage
        , newRunFormPage
@@ -108,15 +107,12 @@ landingPage googleClientId= do
   nullDir
   ok $ toResponse $ landingPageHtml (googleLoginUrl googleClientId "http://localhost:8000/handlelogin" "")
 
-mkTablePage :: ServerPartT IO Response
-mkTablePage = dir "admin" $ dir "mktable" $ do
-  i <- liftIO mkTable
-  ok (toResponse (executeSqlHtml "create table"i))
-
-dropTablePage :: ServerPartT IO Response
-dropTablePage = dir "admin" $ dir "droptable" $ do
-  i <- liftIO dropTable
-  ok (toResponse (executeSqlHtml "drop table" i))
+refreshDbPage :: ServerPartT IO Response
+refreshDbPage = dir "admin" $ dir "refreshdb" $ do
+  drop <- liftIO dropTable
+  runs <- liftIO mkRunTable
+  users <- liftIO mkUserTable
+  ok (toResponse (executeSqlHtml "create table" (drop + runs + users)))
 
 runDataPage :: ServerPartT IO Response
 runDataPage = dir "rundata" $ do
@@ -357,8 +353,18 @@ dropTable = do
   conn <- dbConnect
   execute conn "DROP TABLE happstack.runs" ()
 
-mkTable :: IO Int64
-mkTable = do
+mkUserTable :: IO Int64
+mkUserTable = do
+  conn <- dbConnect
+  execute conn "CREATE TABLE happstack.users (\
+               \ id INT NOT NULL AUTO_INCREMENT,\
+               \ display VARCHAR(255),\
+               \ google_email VARCHAR(255),\
+               \ google_id VARCHAR(255),\
+               \ PRIMARY KEY (id))" ()
+
+mkRunTable :: IO Int64
+mkRunTable = do
   conn <- dbConnect
   execute conn "CREATE TABLE happstack.runs (\
                \ id INT NOT NULL AUTO_INCREMENT,\
