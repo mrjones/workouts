@@ -3,9 +3,12 @@
 -- sudo apt-get install libmysqlclient-dev
 -- cabal install mysql-simple
 -- cabal install happstack
+-- cabal install wreq
 
+import Control.Lens ((^.))
 import Control.Monad (msum)
 import Control.Monad.IO.Class (liftIO)
+import qualified Data.ByteString as BS (unpack)
 import Data.Int (Int64)
 import Data.List (reverse, sort, findIndex)
 import Data.Monoid (mconcat)
@@ -18,12 +21,16 @@ import Database.MySQL.Simple
 import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
 import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir)
+--import Network.HTTP.Conduit (parseUrl, newManager, httpLbs, method, conduitManagerSettings)
+import Network.Wreq (post, responseBody, FormParam((:=)))
 import System.Environment (getArgs)
 import System.Locale (defaultTimeLocale)
 import Text.Blaze (toValue)
 import Text.Blaze.Html5 ((!))
 import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
+import qualified Data.Text.Lazy as TL (unpack)
+import Data.Text.Lazy.Encoding (decodeUtf8)
 import Text.Printf (printf)
 import Text.Read (readMaybe)
 
@@ -32,8 +39,10 @@ main:: IO()
 main = do
   args <- getArgs
   googleClientId <- return $ head args
+  googleClientSecret <- return $ head $ tail args
   putStrLn $ "Using google client id: " ++ googleClientId
-  simpleHTTP nullConf $ allPages googleClientId
+  putStrLn $ "Using google client secret: " ++ googleClientSecret
+  simpleHTTP nullConf $ allPages googleClientId googleClientSecret
 
 --
 -- Data types
@@ -57,8 +66,8 @@ data MutationKind = Create | Modify | Delete deriving (Read, Show)
 -- Routing / handlers
 --
 
-allPages :: String -> ServerPartT IO Response
-allPages googleClientId = do
+allPages :: String -> String -> ServerPartT IO Response
+allPages googleClientId googleClientSecret = do
   decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
   msum [ mkTablePage
        , dropTablePage
@@ -66,13 +75,15 @@ allPages googleClientId = do
        , editRunFormPage
        , newRunFormPage
        , handleMutateRunPage
-       , handleLoginPage
+       , handleLoginPage googleClientId googleClientSecret
        , landingPage googleClientId
        ]
 
-handleLoginPage :: ServerPartT IO Response
-handleLoginPage = dir "handlelogin" $ do
-  ok $ toResponse $ simpleMessageHtml "logging in..."
+handleLoginPage :: String -> String -> ServerPartT IO Response
+handleLoginPage clientid secret = dir "handlelogin" $ do
+  code <- look "code"
+  id <- liftIO $ getGoogleId clientid secret code
+  ok $ toResponse $ simpleMessageHtml (code ++ " " ++ id)
 
 landingPage :: String -> ServerPartT IO Response
 landingPage googleClientId= do
@@ -133,6 +144,29 @@ handleMutateRunPage = dir "handlemutaterun" $ do
 googleLoginUrl :: String -> String -> String -> String
 googleLoginUrl clientid redirect state =
   printf "https://accounts.google.com/o/oauth2/auth?client_id=%s&response_type=code&scope=openid%%20email&redirect_uri=%s&state=%s" clientid redirect state
+
+getGoogleIdUrl :: String
+getGoogleIdUrl = "https://www.googleapis.com/oauth2/v3/token"
+
+--getGoogleIdPostBody :: String -> String -> String -> IO String
+--getGoogleIdPostBody clientid secret code =
+--  printf "code=%s&client_id=%s&client_secret=%s&redirect_uri=%s&grant_type=authorization_code" code clientid secret "http://localhost:8000/handlelogin"
+
+getGoogleId :: String -> String -> String -> IO String
+getGoogleId clientid secret code = do
+  r <- post getGoogleIdUrl [ "code" := code
+                           , "client_id" := clientid
+                           , "client_secret" := secret
+                           , "redirect_uri" := ("http://localhost:8000/handlelogin" :: String)
+                           , "grant_type" := ("authorization_code" :: String)
+                           ]
+  return $ TL.unpack $ decodeUtf8 $ r ^. responseBody
+--  initReq <- parseUrl getGoogleIdUrl
+--  manager <- newManager conduitManagerSettings
+--  let request = initReq { method = "POST" } in
+--    response <- httpLbs request manager
+      
+      
 
 annotate :: [Run] -> [(Run, RunMeta)]
 annotate rs = zip rs (annotate2 rs)
