@@ -206,22 +206,19 @@ decodeToString inTxt =
   
 getGoogleId :: String -> String -> String -> IO (Maybe Identity)
 getGoogleId clientid secret code = do
-  r <- post getGoogleIdUrl [ "code" := code
-                           , "client_id" := clientid
-                           , "client_secret" := secret
-                           , "redirect_uri" := ("http://localhost:8000/handlelogin" :: String)
-                           , "grant_type" := ("authorization_code" :: String)
-                           ]
-  putStrLn $ TL.unpack $ decodeUtf8 $ r ^. responseBody
-  encodedIdTxt <- return $ r ^. responseBody .key "id_token" . _String
-  putStrLn ("Decoding: "  ++ (show encodedIdTxt))
-  elems <- return $ Text.splitOn "." encodedIdTxt
-  putStrLn $ show elems
-  jwtHeader <- return $ (jwtDecode (head elems) :: Maybe JWTHeader)
-  putStrLn $ show jwtHeader
-  putStrLn $ "payload: " ++ (decodeToString (head (tail elems)))
-  jwtPayload <- return $ (jwtDecode (head (tail elems)) :: Maybe JWTPayload)
-  putStrLn $ show jwtPayload
+  r <- post getGoogleIdUrl
+       [ "code" := code
+       , "client_id" := clientid
+       , "client_secret" := secret
+       , "redirect_uri" := ("http://localhost:8000/handlelogin" :: String)
+       , "grant_type" := ("authorization_code" :: String)
+       ]
+  encodedToken <- return $ r ^. responseBody .key "id_token" . _String
+  encodedParts <- return $ Text.splitOn "." encodedToken
+  -- TODO(mrjones): verify the signature with the algorithm named in
+  -- the header
+  -- jwtHeader <- return $ (jwtDecode (head encodedParts) :: Maybe JWTHeader)
+  jwtPayload <- return $ (jwtDecode (head (tail encodedParts)) :: Maybe JWTPayload)
   return $ case jwtPayload of
     Nothing -> Nothing
     Just payload -> Just (Identity (email payload) (sub payload) Google)
