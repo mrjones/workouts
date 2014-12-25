@@ -31,7 +31,7 @@ import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, local
 import Database.MySQL.Simple
 import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
-import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir, mkCookie, addCookie, readCookieValue, CookieLife(Session), lookCookieValue, expireCookie, withHost)
+import Happstack.Server (dir, nullConf, simpleHTTPWithSocket, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir, mkCookie, addCookie, readCookieValue, CookieLife(Session), lookCookieValue, expireCookie, withHost, port, bindPort)
 import Network.Wreq (post, responseBody, FormParam((:=)))
 import System.Environment (getArgs)
 import System.Locale (defaultTimeLocale)
@@ -47,15 +47,22 @@ import Web.JWT (decode, claims, header, signature)
 main:: IO()
 main = do
   args <- getArgs
-  googleClientId <- return $ head args
-  googleClientSecret <- return $ head $ tail args
-  adminKind <- return $ head $ tail $ tail args
-  adminId <- return $ head $ tail $ tail $ tail args
+  (googleClientId:googleClientSecret:adminKind:adminId:portS:_)  <- return $ args
+--  googleClientSecret <- return $ head $ tail args
+--  adminKind <- return $ head $ tail $ tail args
+--  adminId <- return $ head $ tail $ tail $ tail args
   putStrLn $ "Using google client id: " ++ googleClientId
   putStrLn $ "Using google client secret: " ++ googleClientSecret
   putStrLn $ "Using admin kind: " ++ adminKind
   putStrLn $ "Using admin id: " ++ adminId
-  simpleHTTP nullConf $ allPages googleClientId googleClientSecret adminKind adminId
+  putStrLn $ "Using admin id: " ++ adminId
+  putStrLn $ "Using port: " ++ (show portS)
+  case (readMaybe portS :: Maybe Int) of
+    Nothing -> fail "Couldn't parse port"
+    Just p -> do
+      let conf = nullConf { port = p }
+      socket <- bindPort conf
+      simpleHTTPWithSocket socket conf $ allPages googleClientId googleClientSecret adminKind adminId
 
 --
 -- Data types
