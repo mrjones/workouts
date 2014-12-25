@@ -47,7 +47,7 @@ import Web.JWT (decode, claims, header, signature)
 main:: IO()
 main = do
   args <- getArgs
-  (googleClientId:googleClientSecret:adminKind:adminId:portS:_)  <- return $ args
+  (googleClientId:googleClientSecret:adminKind:adminId:portS:mysqlHost:_)  <- return $ args
 --  googleClientSecret <- return $ head $ tail args
 --  adminKind <- return $ head $ tail $ tail args
 --  adminId <- return $ head $ tail $ tail $ tail args
@@ -57,12 +57,13 @@ main = do
   putStrLn $ "Using admin id: " ++ adminId
   putStrLn $ "Using admin id: " ++ adminId
   putStrLn $ "Using port: " ++ (show portS)
+  putStrLn $ "Using mysql host: " ++ mysqlHost
   case (readMaybe portS :: Maybe Int) of
     Nothing -> fail "Couldn't parse port"
     Just p -> do
       let conf = nullConf { port = p }
       socket <- bindPort conf
-      simpleHTTPWithSocket socket conf $ allPages googleClientId googleClientSecret adminKind adminId
+      simpleHTTPWithSocket socket conf $ allPages googleClientId googleClientSecret adminKind adminId mysqlHost
 
 --
 -- Data types
@@ -100,23 +101,24 @@ data Identity = Identity{ displayName :: String
 -- Routing / handlers
 --
 
-allPages :: String -> String -> String -> String -> ServerPartT IO Response
-allPages googleClientId googleClientSecret adminKind adminId =
+allPages :: String -> String -> String -> String -> String -> ServerPartT IO Response
+allPages googleClientId googleClientSecret adminKind adminId mysqlHost =
   withHost (\host -> do
+               conn <- liftIO $ dbConnect mysqlHost
                redirectUrl <- return $ "http://" ++ host ++ "/handlelogin"
                loginUrl <- return $ googleLoginUrl googleClientId redirectUrl ""
-               let checkLogin = (requireLogin loginUrl) in do
+               let checkLogin = (requireLogin conn loginUrl) in do
                  decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
-                 msum [ dir "admin" $ dir "refreshdb" $ requireAdmin adminKind adminId refreshDbPage
-                      , dir "admin" $ dir "mkdb" $ requireAdmin adminKind adminId mkDbPage
-                      , dir "rundata" $ checkLogin runDataPage
-                      , dir "editrun" $ checkLogin editRunFormPage
+                 msum [ dir "admin" $ dir "refreshdb" $ requireAdmin conn adminKind adminId (refreshDbPage conn)
+                      , dir "admin" $ dir "mkdb" $ requireAdmin conn adminKind adminId (mkDbPage conn)
+                      , dir "rundata" $ checkLogin (runDataPage conn)
+                      , dir "editrun" $ checkLogin (editRunFormPage conn)
                       , dir "newrun" $ checkLogin newRunFormPage
-                      , dir "handlemutaterun" $ checkLogin handleMutateRunPage
-                      , dir "handlelogin" $ handleLoginPage googleClientId googleClientSecret redirectUrl
+                      , dir "handlemutaterun" $ checkLogin $ handleMutateRunPage conn
+                      , dir "handlelogin" $ handleLoginPage conn googleClientId googleClientSecret redirectUrl
                       , dir "logout" $ logoutPage
                       , isLoggedInPage
-                      , checkLogin $ landingPage googleClientId
+                      , checkLogin $ landingPage conn googleClientId
                       ])
 
 logoutPage :: ServerPartT IO Response
@@ -129,25 +131,24 @@ isLoggedInPage = dir "isloggedin" $ do
   u <- readCookieValue "userid"
   ok $ toResponse $ simpleMessageHtml (show (u :: Int))
 
-handleLoginPage :: String -> String -> String -> ServerPartT IO Response
-handleLoginPage clientid secret redirectUrl = do
+handleLoginPage :: Connection -> String -> String -> String -> ServerPartT IO Response
+handleLoginPage conn clientid secret redirectUrl = do
   code <- look "code"
   mid <- liftIO $ getGoogleId clientid secret code redirectUrl
   case mid of
     Nothing -> ok $ toResponse $ simpleMessageHtml "Login failed"
     Just id -> do
-      mu <- liftIO $ findOrInsertGoogleUser (displayName id) (uniqueId id)
+      mu <- liftIO $ findOrInsertGoogleUser conn (displayName id) (uniqueId id)
       case mu of
         Nothing -> ok $ toResponse $ simpleMessageHtml "user <-> db failed"
         -- TODO(mrjones): this is insanely insecure
         Just u -> do addCookie Session (mkCookie "userid" (show $ userId u))
                      seeOther ("/" :: String) $ toResponse ("Logging in..." :: String)
 
-requireAdmin :: String -> String -> ServerPartT IO Response -> ServerPartT IO Response
-requireAdmin adminKind adminId protectedPage = do
+requireAdmin :: Connection -> String -> String -> ServerPartT IO Response -> ServerPartT IO Response
+requireAdmin conn adminKind adminId protectedPage = do
   uid <- readCookieValue "userid"
   liftIO $ putStrLn (show uid)
-  conn <- liftIO $ dbConnect
   mu <- liftIO $ findUserById conn uid
   liftIO $ putStrLn (show mu)
   case mu of
@@ -158,39 +159,36 @@ requireAdmin adminKind adminId protectedPage = do
               else ok $ toResponse $ simpleMessageHtml "NOT ADMIN"
                         
 
-requireLogin :: String -> ServerPartT IO Response -> ServerPartT IO Response
-requireLogin loginUrl page = msum
+requireLogin :: Connection -> String -> ServerPartT IO Response -> ServerPartT IO Response
+requireLogin conn loginUrl page = msum
  [ do uid <- readCookieValue "userid"
-      conn <- liftIO $ dbConnect
       mu <- liftIO $ findUserById conn uid
       page
  , ok $ toResponse $ notLoggedInHtml loginUrl
  ]
 
-landingPage :: String -> ServerPartT IO Response
-landingPage googleClientId = do
+landingPage :: Connection -> String -> ServerPartT IO Response
+landingPage conn googleClientId = do
   uid <- readCookieValue "userid"
-  conn <- liftIO $ dbConnect
   mu <- liftIO $ findUserById conn uid
   ok $ toResponse $ landingPageHtml mu
 
 
-refreshDbPage :: ServerPartT IO Response
-refreshDbPage = do
-  drop <- liftIO dropTable
-  runs <- liftIO mkRunTable
-  users <- liftIO mkUserTable
+refreshDbPage :: Connection -> ServerPartT IO Response
+refreshDbPage conn = do
+  drop <- liftIO $ dropTable conn
+  runs <- liftIO $ mkRunTable conn
+  users <- liftIO $ mkUserTable conn
   ok (toResponse (executeSqlHtml "create table" (drop + runs + users)))
 
-mkDbPage :: ServerPartT IO Response
-mkDbPage = do
-  runs <- liftIO mkRunTable
-  users <- liftIO mkUserTable
+mkDbPage :: Connection -> ServerPartT IO Response
+mkDbPage conn = do
+  runs <- liftIO $ mkRunTable conn
+  users <- liftIO $ mkUserTable conn
   ok (toResponse (executeSqlHtml "create table" (runs + users)))
 
-runDataPage :: ServerPartT IO Response
-runDataPage = do
-  conn <- liftIO dbConnect
+runDataPage :: Connection -> ServerPartT IO Response
+runDataPage conn = do
   runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs ORDER BY date ASC" ()
   ok (toResponse (dataTableHtml (annotate runs)))
 
@@ -201,15 +199,14 @@ newRunFormPage = do
   today <- return $ localDay $ utcToLocalTime tz utcNow
   ok $ toResponse $ runDataHtml Nothing today Create
 
-editRunFormPage :: ServerPartT IO Response
-editRunFormPage = do
+editRunFormPage :: Connection -> ServerPartT IO Response
+editRunFormPage conn = do
   id <- queryString $ look "id"
-  conn <- liftIO dbConnect
   runs <- liftIO $ (query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs WHERE id = (?)" [id])
   ok $ toResponse $ runDataHtml (Just (head runs)) (fromGregorian 2014 1 1) Modify
 
-handleMutateRunPage :: ServerPartT IO Response
-handleMutateRunPage = do
+handleMutateRunPage :: Connection -> ServerPartT IO Response
+handleMutateRunPage conn = do
   mutationKindS <- body $ look "button"
   distanceS <- body $ look "distance"
   timeS <- body $ look "time"
@@ -219,7 +216,6 @@ handleMutateRunPage = do
   mutationKind <- return $ readMaybe mutationKindS
   idS <- body $ look "id"
   run <- return $ (parseRun distanceS timeS dateS inclineS commentS idS)
-  conn <- liftIO dbConnect
   n <- liftIO $ storeRun conn run mutationKind
   case n of
     1 -> seeOther ("/rundata" :: String) (toResponse ("Redirecting to run list" :: String))
@@ -293,9 +289,8 @@ getGoogleId clientid secret code redirectUrl = do
     Nothing -> Nothing
     Just payload -> Just (Identity (email payload) (sub payload) Google)
 
-findOrInsertGoogleUser :: String -> String -> IO (Maybe User)
-findOrInsertGoogleUser email sub = do
-  conn <- dbConnect
+findOrInsertGoogleUser :: Connection -> String -> String -> IO (Maybe User)
+findOrInsertGoogleUser conn email sub = do
   googleUsers <- query conn "SELECT google_email, google_id FROM happstack.google_users WHERE google_id = (?)" [sub] :: IO [GoogleUser]
   case googleUsers :: [GoogleUser] of
     [] -> insertGoogleUser conn email sub
@@ -425,11 +420,12 @@ storeRun conn mrun mkind =
 -- Database logic
 --
 
-dbConnect :: IO Connection
-dbConnect = connect defaultConnectInfo
+dbConnect :: String -> IO Connection
+dbConnect hostname = connect defaultConnectInfo
     { connectUser = "happstack"
     , connectPassword = "happstack"
     , connectDatabase = "happstack"
+    , connectHost = hostname
     }
 
 instance QueryResults Run where
@@ -461,16 +457,14 @@ storeRun2 conn r kind =
 -- Database Admin
 --
 
-dropTable :: IO Int64
-dropTable = do
-  conn <- dbConnect
+dropTable :: Connection -> IO Int64
+dropTable conn = do
   execute conn "DROP TABLE happstack.runs" ()
   execute conn "DROP TABLE happstack.google_users;" ()
   execute conn "DROP TABLE happstack.users;" ()
 
-mkUserTable :: IO Int64
-mkUserTable = do
-  conn <- dbConnect
+mkUserTable :: Connection -> IO Int64
+mkUserTable conn = do
   execute conn "CREATE TABLE happstack.google_users (\
                \ google_email VARCHAR(255),\
                \ google_id VARCHAR(255),\
@@ -482,9 +476,8 @@ mkUserTable = do
                \ foreign_id VARCHAR(255),\
                \ PRIMARY KEY (id))" ()
 
-mkRunTable :: IO Int64
-mkRunTable = do
-  conn <- dbConnect
+mkRunTable :: Connection -> IO Int64
+mkRunTable conn = do
   execute conn "CREATE TABLE happstack.runs (\
                \ id INT NOT NULL AUTO_INCREMENT,\
                \ date DATE,\
