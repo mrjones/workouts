@@ -31,7 +31,7 @@ import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, local
 import Database.MySQL.Simple
 import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
-import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir, mkCookie, addCookie, readCookieValue, CookieLife(Session), lookCookieValue, expireCookie)
+import Happstack.Server (dir, nullConf, simpleHTTP, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir, mkCookie, addCookie, readCookieValue, CookieLife(Session), lookCookieValue, expireCookie, withHost)
 import Network.Wreq (post, responseBody, FormParam((:=)))
 import System.Environment (getArgs)
 import System.Locale (defaultTimeLocale)
@@ -94,21 +94,23 @@ data Identity = Identity{ displayName :: String
 --
 
 allPages :: String -> String -> String -> String -> ServerPartT IO Response
-allPages googleClientId googleClientSecret adminKind adminId = do
-  loginUrl <- return $ googleLoginUrl googleClientId "http://localhost:8000/handlelogin" ""
-  let checkLogin = (requireLogin loginUrl) in do
-    decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
-    msum [ dir "admin" $ dir "refreshdb" $ requireAdmin adminKind adminId refreshDbPage
-         , dir "admin" $ dir "mkdb" $ requireAdmin adminKind adminId mkDbPage
-         , dir "rundata" $ checkLogin runDataPage
-         , dir "editrun" $ checkLogin editRunFormPage
-         , dir "newrun" $ checkLogin newRunFormPage
-         , dir "handlemutaterun" $ checkLogin handleMutateRunPage
-         , dir "handlelogin" $ handleLoginPage googleClientId googleClientSecret
-         , dir "logout" $ logoutPage
-         , isLoggedInPage
-         , landingPage googleClientId
-         ]
+allPages googleClientId googleClientSecret adminKind adminId =
+  withHost (\host -> do
+               redirectUrl <- return $ "http://" ++ host ++ "/handlelogin"
+               loginUrl <- return $ googleLoginUrl googleClientId redirectUrl ""
+               let checkLogin = (requireLogin loginUrl) in do
+                 decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
+                 msum [ dir "admin" $ dir "refreshdb" $ requireAdmin adminKind adminId refreshDbPage
+                      , dir "admin" $ dir "mkdb" $ requireAdmin adminKind adminId mkDbPage
+                      , dir "rundata" $ checkLogin runDataPage
+                      , dir "editrun" $ checkLogin editRunFormPage
+                      , dir "newrun" $ checkLogin newRunFormPage
+                      , dir "handlemutaterun" $ checkLogin handleMutateRunPage
+                      , dir "handlelogin" $ handleLoginPage googleClientId googleClientSecret redirectUrl
+                      , dir "logout" $ logoutPage
+                      , isLoggedInPage
+                      , checkLogin $ landingPage googleClientId
+                      ])
 
 logoutPage :: ServerPartT IO Response
 logoutPage = do
@@ -120,10 +122,10 @@ isLoggedInPage = dir "isloggedin" $ do
   u <- readCookieValue "userid"
   ok $ toResponse $ simpleMessageHtml (show (u :: Int))
 
-handleLoginPage :: String -> String -> ServerPartT IO Response
-handleLoginPage clientid secret = do
+handleLoginPage :: String -> String -> String -> ServerPartT IO Response
+handleLoginPage clientid secret redirectUrl = do
   code <- look "code"
-  mid <- liftIO $ getGoogleId clientid secret code
+  mid <- liftIO $ getGoogleId clientid secret code redirectUrl
   case mid of
     Nothing -> ok $ toResponse $ simpleMessageHtml "Login failed"
     Just id -> do
@@ -159,14 +161,12 @@ requireLogin loginUrl page = msum
  ]
 
 landingPage :: String -> ServerPartT IO Response
-landingPage googleClientId =
-  msum
-  [ do uid <- readCookieValue "userid"
-       conn <- liftIO $ dbConnect
-       mu <- liftIO $ findUserById conn uid
-       ok $ toResponse $ landingPageHtml (googleLoginUrl googleClientId "http://localhost:8000/handlelogin" "") mu
-  , ok $ toResponse $ landingPageHtml (googleLoginUrl googleClientId "http://localhost:8000/handlelogin" "") Nothing
-  ]
+landingPage googleClientId = do
+  uid <- readCookieValue "userid"
+  conn <- liftIO $ dbConnect
+  mu <- liftIO $ findUserById conn uid
+  ok $ toResponse $ landingPageHtml mu
+
 
 refreshDbPage :: ServerPartT IO Response
 refreshDbPage = do
@@ -267,13 +267,13 @@ decodeToString :: Text.Text -> String
 decodeToString inTxt = 
   Text.unpack (TextEnc.decodeUtf8 (BS64.decodeLenient (TextEnc.encodeUtf8 inTxt)))
   
-getGoogleId :: String -> String -> String -> IO (Maybe Identity)
-getGoogleId clientid secret code = do
+getGoogleId :: String -> String -> String -> String -> IO (Maybe Identity)
+getGoogleId clientid secret code redirectUrl = do
   r <- post getGoogleIdUrl
        [ "code" := code
        , "client_id" := clientid
        , "client_secret" := secret
-       , "redirect_uri" := ("http://localhost:8000/handlelogin" :: String)
+       , "redirect_uri" := redirectUrl
        , "grant_type" := ("authorization_code" :: String)
        ]
   encodedToken <- return $ r ^. responseBody .key "id_token" . _String
@@ -506,8 +506,8 @@ simpleMessageHtml msg =
     H.body $ do
       H.toHtml msg
 
-landingPageHtml :: String -> Maybe User -> H.Html
-landingPageHtml googleUrl muser =
+landingPageHtml :: Maybe User -> H.Html
+landingPageHtml muser =
   H.html $ do
     H.head $ do
       H.title $ "Workout Database"
@@ -517,7 +517,7 @@ landingPageHtml googleUrl muser =
           H.div $ H.a ! A.href "/newrun" $ H.html "New run"
           H.div $ H.a ! A.href "/rundata" $ H.html "View runs"
           H.div $ H.a ! A.href "/logout" $ H.html "Logout"
-        Nothing -> H.div $ H.a ! A.href (toValue googleUrl) $ "Login"
+        Nothing -> H.div $ H.html "Error"
 
 dataTableHtml :: [(Run, RunMeta)] -> H.Html
 dataTableHtml rs =
