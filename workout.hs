@@ -643,9 +643,9 @@ notLoggedInHtml googleUrl =
     H.body $ do
       H.div $ H.a ! A.href (toValue googleUrl) $ "Login"
 
-jsArray :: String -> String -> String
-jsArray name contents =
-  printf "var %s = [%s];" name contents
+jsArray :: String -> String -> String -> String
+jsArray prefix name contents =
+  printf "var %s_%s = [%s];" prefix name contents
 
 jsStr :: Show a => a -> String
 jsStr d = printf "\"%s\"" (show d)
@@ -653,12 +653,29 @@ jsStr d = printf "\"%s\"" (show d)
 jsDate :: Day -> String
 jsDate date = formatTime defaultTimeLocale "new Date(%Y, (%m - 1), %e)" date
 
+data ChartKind = Line | Scatter deriving (Show)
+
 mpwChartJs :: [(Run, RunMeta)] -> String
-mpwChartJs runs = concat
-  [ jsArray "miles" $ concat . intersperse "," $ map (show . miles7 . snd) runs
-  , jsArray "dates" $ concat . intersperse "," $ map (jsDate . date . fst) runs
-  , "mpwChart(miles, dates);"
+mpwChartJs runs = chartJs Line "Miles (last 7)" "mpw" (show . miles7 . snd) runs
+
+paceChartJs :: [(Run, RunMeta)] -> String
+paceChartJs runs = chartJs Scatter "Pace (MpH)" "pace" (show . mph . fst) runs
+
+chartJs :: ChartKind -> String -> String -> ((Run, RunMeta) -> String) -> [(Run, RunMeta)] -> String
+chartJs kind title id f runs = concat
+  [ jsArray id "miles" $ concat . intersperse "," $ map f runs
+  , jsArray id "dates" $ concat . intersperse "," $ map (jsDate . date . fst) runs
+  , printf "xyChart('%s', '%s_div' , '%s', %s_dates, %s_miles);" (show kind) id title id id
   ]
+
+chartHtml :: ChartKind -> String -> String -> ((Run, RunMeta) -> String) -> [(Run, RunMeta)]-> H.Html
+chartHtml kind title id f runs =
+  let divname = id ++ "_div"
+  in do
+    H.h3 $ H.toHtml title
+    H.div ! A.id (toValue divname) $ ""
+    H.script ! A.type_ "text/javascript" $ H.toHtml $
+      chartJs kind title id f runs
 
 mpwChartHtml :: [(Run, RunMeta)] -> User -> H.Html
 mpwChartHtml runs user =
@@ -668,6 +685,5 @@ mpwChartHtml runs user =
       H.script ! A.type_ "text/javascript" ! A.src "https://www.google.com/jsapi" $ ""
       H.script ! A.type_ "text/javascript" ! A.src "/js/workouts.js" $ ""
     H.body $ do
-      H.div $ H.toHtml $ mpwChartJs runs
-      H.div ! A.id "chart_div" $ ""
-      H.script ! A.type_ "text/javascript" $ H.toHtml $ mpwChartJs runs
+      chartHtml Line "Miles (last 7)" "mpw" (show . miles7 . snd) runs
+      chartHtml Scatter "Pace (mph)" "mph" (show . mph . fst) runs
