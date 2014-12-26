@@ -337,7 +337,7 @@ annotate2 rs = map buildMeta
                 (computeRest (map date rs))
                 (rankDesc (map scoreRun rs))
                 (rankAsc (map pace rs))
-                (computeMileage 7 rs))
+                (trailingMileage 7 rs))
 
 buildMeta :: (Integer, Maybe Int, Maybe Int, Float) -> RunMeta
 buildMeta (rest, mscore, mpace, miles7) =
@@ -349,20 +349,21 @@ buildMeta (rest, mscore, mpace, miles7) =
         Nothing -> 0
   in RunMeta rest score pace miles7
 
-consume :: Integer -> Run -> State [Run] Float
-consume windowSize nextRun =
+
+trailingOne :: Integer -> Run -> State [Run] Float
+trailingOne windowSize nextRun =
   state $ (\rs -> (foldr (\candidate (distAcc, outAcc) ->
                            if (diffDays (date nextRun) (date candidate) <= windowSize)
                            then ((distAcc + (distance candidate)), candidate:outAcc)
                            else (distAcc, outAcc)) (0, []) (rs ++ [nextRun])))
 
-consumeAll :: Integer -> [Run] -> State [Run] [Float]
-consumeAll windowSize runs =
-  mapM (consume windowSize) runs
+trailingAll :: Integer -> [Run] -> State [Run] [Float]
+trailingAll windowSize runs =
+  mapM (trailingOne windowSize) runs
 
-computeMileage :: Integer -> [Run] -> [Float]
-computeMileage windowSize runs =
-  fst $ runState (consumeAll windowSize runs) []  
+trailingMileage :: Integer -> [Run] -> [Float]
+trailingMileage windowSize runs =
+  fst $ runState (trailingAll windowSize runs) []  
 
 computeRest :: [Day] -> [Integer]
 computeRest ds =
