@@ -114,21 +114,25 @@ allPages googleClientId googleClientSecret adminKind adminId mysqlHost =
   withHost (\host -> do
                conn <- liftIO $ dbConnect mysqlHost
                redirectUrl <- return $ "http://" ++ host ++ "/handlelogin"
-               msum [ do user <- (readCookieValue "userid") `checkRqM` (userWithId conn)
-                         decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
-                         msum [ dir "admin" $ dir "refreshdb" $ requireAdmin conn adminKind adminId (refreshDbPage conn)
-                              , dir "admin" $ dir "mkdb" $ requireAdmin conn adminKind adminId (mkDbPage conn)
-                              , dir "rundata" $ runDataPage conn user
-                              , dir "editrun" $ editRunFormPage conn
-                              , dir "newrun" $ newRunFormPage
-                              , dir "handlemutaterun" $ handleMutateRunPage conn user
-                              , landingPage conn googleClientId
-                              ]
+               msum [ loggedInPages conn googleClientId adminKind adminId
                     , dir "handlelogin" $ handleLoginPage conn googleClientId googleClientSecret redirectUrl
                     , dir "logout" $ logoutPage
                     , do loginUrl <- return $ googleLoginUrl googleClientId redirectUrl ""
                          ok $ toResponse $ notLoggedInHtml loginUrl
                     ])
+
+loggedInPages :: Connection -> String -> String -> String -> ServerPartT IO Response
+loggedInPages conn googleClientId adminKind adminId = do
+  user <- (readCookieValue "userid") `checkRqM` (userWithId conn)
+  decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
+  msum [ dir "admin" $ dir "refreshdb" $ requireAdmin conn adminKind adminId (refreshDbPage conn)
+       , dir "admin" $ dir "mkdb" $ requireAdmin conn adminKind adminId (mkDbPage conn)
+       , dir "rundata" $ runDataPage conn user
+       , dir "editrun" $ editRunFormPage conn
+       , dir "newrun" $ newRunFormPage
+       , dir "handlemutaterun" $ handleMutateRunPage conn user
+       , landingPage conn googleClientId
+       ]
 
 logoutPage :: ServerPartT IO Response
 logoutPage = do
