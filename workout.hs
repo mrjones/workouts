@@ -651,7 +651,7 @@ jsStr :: Show a => a -> String
 jsStr d = printf "\"%s\"" (show d)
 
 jsDate :: Day -> String
-jsDate date = formatTime defaultTimeLocale "new Date(%Y, %m, %e)" date
+jsDate date = formatTime defaultTimeLocale "new Date(%Y, (%m - 1), %e)" date
 
 mpwChartJs :: [(Run, RunMeta)] -> String
 mpwChartJs runs = concat
