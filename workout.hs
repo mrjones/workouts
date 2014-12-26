@@ -79,6 +79,7 @@ data Run = Run { distance :: Float
                , incline :: Float
                , comment :: String
                , runid :: Int
+               , runUserId :: Int
                } deriving (Show)
 
 data User = User { userId :: Int,
@@ -104,7 +105,6 @@ data Identity = Identity{ displayName :: String
 userWithId :: Connection -> String -> ServerPartT IO (Either String User)
 userWithId conn id = do
   maybeuser <- liftIO $ findUserById conn id
-  liftIO $ putStrLn (id ++ "[" ++ (show maybeuser) ++ "]")
   return $ case maybeuser of
     Nothing -> Left ("No user with id: " ++ id)
     Just user -> Right user
@@ -121,7 +121,7 @@ allPages googleClientId googleClientSecret adminKind adminId mysqlHost =
                               , dir "rundata" $ runDataPage conn user
                               , dir "editrun" $ editRunFormPage conn
                               , dir "newrun" $ newRunFormPage
-                              , dir "handlemutaterun" $ handleMutateRunPage conn
+                              , dir "handlemutaterun" $ handleMutateRunPage conn user
                               , landingPage conn googleClientId
                               ]
                     , dir "handlelogin" $ handleLoginPage conn googleClientId googleClientSecret redirectUrl
@@ -193,7 +193,7 @@ mkDbPage conn = do
 
 runDataPage :: Connection -> User -> ServerPartT IO Response
 runDataPage conn user = do
-  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs WHERE user_id = (?)ORDER BY date ASC" [(userId user)]
+  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE user_id = (?)ORDER BY date ASC" [(userId user)]
   ok (toResponse (dataTableHtml (annotate runs)))
 
 newRunFormPage :: ServerPartT IO Response
@@ -206,11 +206,11 @@ newRunFormPage = do
 editRunFormPage :: Connection -> ServerPartT IO Response
 editRunFormPage conn = do
   id <- queryString $ look "id"
-  runs <- liftIO $ (query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs WHERE id = (?)" [id])
+  runs <- liftIO $ (query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE id = (?)" [id])
   ok $ toResponse $ runDataHtml (Just (head runs)) (fromGregorian 2014 1 1) Modify
 
-handleMutateRunPage :: Connection -> ServerPartT IO Response
-handleMutateRunPage conn = do
+handleMutateRunPage :: Connection -> User -> ServerPartT IO Response
+handleMutateRunPage conn user= do
   mutationKindS <- body $ look "button"
   distanceS <- body $ look "distance"
   timeS <- body $ look "time"
@@ -219,7 +219,7 @@ handleMutateRunPage conn = do
   commentS <- body $ look "comment"
   mutationKind <- return $ readMaybe mutationKindS
   idS <- body $ look "id"
-  run <- return $ (parseRun distanceS timeS dateS inclineS commentS idS)
+  run <- return $ (parseRun distanceS timeS dateS inclineS commentS idS (userId user))
   n <- liftIO $ storeRun conn run mutationKind
   case n of
     1 -> seeOther ("/rundata" :: String) (toResponse ("Redirecting to run list" :: String))
@@ -369,14 +369,14 @@ scoreRun r =
   let time_minutes = (fromIntegral (duration r)) / 60
   in 1000 * 4 * ((distance r) ** (1.06)) / time_minutes
 
-parseRun :: String -> String -> String -> String -> String -> String -> Maybe Run
-parseRun distanceS durationS dateS inclineS commentS idS = do
+parseRun :: String -> String -> String -> String -> String -> String -> Int -> Maybe Run
+parseRun distanceS durationS dateS inclineS commentS idS userId = do
   distance <- readMaybe distanceS :: Maybe Float
   incline <- readMaybe inclineS :: Maybe Float
   duration <- parseDuration durationS
   date <- parseDate dateS
   id <- readMaybe idS :: Maybe Int
-  Just (Run distance duration date incline commentS id)
+  Just (Run distance duration date incline commentS id userId)
 
 parseDuration :: String -> Maybe Int
 parseDuration input = do
@@ -433,8 +433,8 @@ dbConnect hostname = connect defaultConnectInfo
     }
 
 instance QueryResults Run where
-  convertResults [f_dist,f_dur,f_date,f_incl,f_comm,f_id] [v_dist,v_dur,v_date,v_incl,v_comm,v_id] =
-    Run (convert f_dist v_dist) (convert f_dur v_dur) (convert f_date v_date) (convert f_incl v_incl) (convert f_comm v_comm) (convert f_id v_id)
+  convertResults [f_dist,f_dur,f_date,f_incl,f_comm,f_id,f_uid] [v_dist,v_dur,v_date,v_incl,v_comm,v_id,v_uid] =
+    Run (convert f_dist v_dist) (convert f_dur v_dur) (convert f_date v_date) (convert f_incl v_incl) (convert f_comm v_comm) (convert f_id v_id) (convert f_uid v_uid)
 
 instance QueryResults GoogleUser where
   convertResults [f_gemail, f_gid] [v_gemail, v_gid] =
@@ -448,11 +448,11 @@ storeRun2 :: Connection -> Run -> MutationKind -> IO Int64
 storeRun2 conn r kind =
     case kind of
       Create -> execute conn
-                "INSERT INTO happstack.runs (date, miles, duration_sec, incline, comment) VALUES (?, ?, ?, ?, ?)"
-                (date r, distance r, duration r, incline r, comment r)
+                "INSERT INTO happstack.runs (date, miles, duration_sec, incline, comment, user_id) VALUES (?, ?, ?, ?, ?, ?)"
+                (date r, distance r, duration r, incline r, comment r, runUserId r)
       Modify -> execute conn
-                "UPDATE happstack.runs SET date=?, miles=?, duration_sec=?, incline=?, comment=? WHERE id=?"
-                (date r, distance r, duration r, incline r, comment r, runid r)
+                "UPDATE happstack.runs SET date=?, miles=?, duration_sec=?, incline=?, comment=?, user_id=? WHERE id=?"
+                (date r, distance r, duration r, incline r, comment r, runUserId r, runid r)
       Delete -> execute conn
                 "DELETE FROM happstack.runs WHERE id = (?)"
                 [runid r]
