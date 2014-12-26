@@ -12,6 +12,7 @@ import Control.Applicative ((<$>), (<*>))
 import Control.Lens ((^.), (^..))
 import Control.Monad (msum,mzero)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.State.Lazy (State, state, get, runState)
 import Data.Aeson ((.:))
 import Data.Aeson hiding (decode)
 import qualified Data.Aeson as JSON (decode, FromJSON(..), Object(..))
@@ -21,7 +22,7 @@ import qualified Data.ByteString.Lazy.Char8 as C8L (fromStrict)
 import qualified Data.ByteString as BS (unpack)
 import qualified Data.ByteString.Base64 as BS64 (decode, decodeLenient)
 import Data.Int (Int64)
-import Data.List (reverse, sort, findIndex)
+import Data.List (reverse, sort, findIndex, zip4)
 import Data.Monoid (mconcat)
 import qualified Data.Text as Text (splitOn, pack, unpack, Text)
 import qualified Data.Text.Lazy as TL (unpack)
@@ -73,7 +74,9 @@ main = do
 
 data RunMeta = RunMeta { daysOff :: Integer
                        , scoreRank :: Int
-                       , paceRank :: Int }
+                       , paceRank :: Int
+                       , miles7 :: Float
+                       }
 
 data Run = Run { distance :: Float
                , duration :: Int
@@ -330,20 +333,36 @@ annotate rs = zip rs (annotate2 rs)
 
 annotate2 :: [Run] -> [RunMeta]
 annotate2 rs = map buildMeta
-               (zip3
+               (zip4
                 (computeRest (map date rs))
                 (rankDesc (map scoreRun rs))
-                (rankAsc (map pace rs)))
+                (rankAsc (map pace rs))
+                (computeMileage 7 rs))
 
-buildMeta :: (Integer, Maybe Int, Maybe Int) -> RunMeta
-buildMeta (rest, mscore, mpace) =
+buildMeta :: (Integer, Maybe Int, Maybe Int, Float) -> RunMeta
+buildMeta (rest, mscore, mpace, miles7) =
   let score = case mscore of
         Just s -> s + 1
         Nothing -> 0
       pace = case mpace of
         Just p -> p + 1
         Nothing -> 0
-  in RunMeta rest score pace
+  in RunMeta rest score pace miles7
+
+consume :: Integer -> Run -> State [Run] Float
+consume windowSize nextRun =
+  state $ (\rs -> (foldr (\candidate (distAcc, outAcc) ->
+                           if (diffDays (date nextRun) (date candidate) <= windowSize)
+                           then ((distAcc + (distance candidate)), candidate:outAcc)
+                           else (distAcc, outAcc)) (0, []) (rs ++ [nextRun])))
+
+consumeAll :: Integer -> [Run] -> State [Run] [Float]
+consumeAll windowSize runs =
+  mapM (consume windowSize) runs
+
+computeMileage :: Integer -> [Run] -> [Float]
+computeMileage windowSize runs =
+  fst $ runState (consumeAll windowSize runs) []  
 
 computeRest :: [Day] -> [Integer]
 computeRest ds =
@@ -542,7 +561,7 @@ dataTableHeader :: H.Html
 dataTableHeader =
   H.thead $ H.tr $ do
     mconcat $ map (H.td . H.b)
-      ["Date", "Dist", "Time", "Incline", "Pace", "MpH", "Rest", "Score", "Score Rank", "Pace Rank", "Comment", "Edit"]
+      ["Date", "Dist", "Time", "Incline", "Pace", "MpH", "Rest", "Score", "Score Rank", "Pace Rank", "Miles7", "Comment", "Edit"]
 
 dataTableRow :: (Run, RunMeta) -> H.Html
 dataTableRow (r,meta) = H.tr $ do
@@ -556,6 +575,7 @@ dataTableRow (r,meta) = H.tr $ do
   H.td $ H.toHtml $ show $ round (scoreRun r)
   H.td $ H.toHtml $ show $ scoreRank meta
   H.td $ H.toHtml $ show $ paceRank meta
+  H.td $ H.toHtml (printf "%.2f" (miles7 meta) :: String)
   H.td $ H.toHtml $ comment r
   H.td $ do
     "["
