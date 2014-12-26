@@ -108,9 +108,9 @@ allPages googleClientId googleClientSecret adminKind adminId mysqlHost =
                decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
                conn <- liftIO $ dbConnect mysqlHost
                redirectUrl <- return $ "http://" ++ host ++ "/handlelogin"
-               msum [ loggedInPages conn googleClientId adminKind adminId
+               msum [ dir "logout" $ logoutPage
+                    , loggedInPages conn googleClientId adminKind adminId
                     , dir "handlelogin" $ handleLoginPage conn googleClientId googleClientSecret redirectUrl
-                    , dir "logout" $ logoutPage
                     , do loginUrl <- return $ googleLoginUrl googleClientId redirectUrl ""
                          ok $ toResponse $ notLoggedInHtml loginUrl
                     ])
