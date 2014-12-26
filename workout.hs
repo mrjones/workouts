@@ -33,7 +33,7 @@ import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, local
 import Database.MySQL.Simple
 import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
-import Happstack.Server (dir, nullConf, simpleHTTPWithSocket, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir, mkCookie, addCookie, readCookieValue, CookieLife(Session), lookCookieValue, expireCookie, withHost, port, bindPort, checkRqM)
+import Happstack.Server (dir, nullConf, simpleHTTPWithSocket, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir, mkCookie, addCookie, readCookieValue, CookieLife(Session), lookCookieValue, expireCookie, withHost, port, bindPort, checkRqM, serveFile, asContentType)
 import Network.Wreq (post, responseBody, FormParam((:=)))
 import System.Environment (getArgs)
 import System.Locale (defaultTimeLocale)
@@ -111,6 +111,7 @@ allPages googleClientId googleClientSecret adminKind adminId mysqlHost =
                conn <- liftIO $ dbConnect mysqlHost
                redirectUrl <- return $ "http://" ++ host ++ "/handlelogin"
                msum [ dir "logout" $ logoutPage
+                    , dir "js" $ serveFile (asContentType "text/javascript") "static/js/workouts.js"
                     , loggedInPages conn googleClientId adminKind adminId
                     , dir "handlelogin" $ handleLoginPage conn googleClientId googleClientSecret redirectUrl
                     , do loginUrl <- return $ googleLoginUrl googleClientId redirectUrl ""
@@ -525,6 +526,8 @@ dataTableHtml u rs =
   H.html $ do
     H.head $ do
       H.title $ "Data"
+      H.script ! A.type_ "text/javascript" ! A.src "https://www.google.com/jsapi" $ ""
+      H.script ! A.type_ "text/javascript" ! A.src "/js/workouts.js" $ ""
     H.body $ do
       H.div $ do
         H.toHtml $ (userName u) ++ " "
@@ -533,6 +536,7 @@ dataTableHtml u rs =
         dataTableHeader
         mapM_ dataTableRow rs
       H.a ! A.href "/newrun" $ "New run"
+      H.div ! A.id "chart_div" $ ""
 
 dataTableHeader :: H.Html
 dataTableHeader =
