@@ -6,6 +6,8 @@
 -- cabal install wreq
 -- cabal install jwt
 
+-- sudo iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80 -j REDIRECT --to-port 8000
+
 import Control.Applicative ((<$>), (<*>))
 import Control.Lens ((^.), (^..))
 import Control.Monad (msum,mzero)
@@ -182,7 +184,7 @@ mkDbPage conn = do
 runDataPage :: Connection -> User -> ServerPartT IO Response
 runDataPage conn user = do
   runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE user_id = (?)ORDER BY date ASC" [(userId user)]
-  ok (toResponse (dataTableHtml (annotate runs)))
+  ok (toResponse (dataTableHtml user (annotate runs)))
 
 newRunFormPage :: ServerPartT IO Response
 newRunFormPage = do
@@ -518,12 +520,15 @@ landingPageHtml muser =
           H.div $ H.a ! A.href "/logout" $ H.html "Logout"
         Nothing -> H.div $ H.html "Error"
 
-dataTableHtml :: [(Run, RunMeta)] -> H.Html
-dataTableHtml rs =
+dataTableHtml :: User -> [(Run, RunMeta)] -> H.Html
+dataTableHtml u rs =
   H.html $ do
     H.head $ do
       H.title $ "Data"
     H.body $ do
+      H.div $ do
+        H.toHtml $ (userName u) ++ " "
+        H.a ! A.href "/logout" $ "Logout"
       H.table $ do
         dataTableHeader
         mapM_ dataTableRow rs
