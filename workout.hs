@@ -353,7 +353,7 @@ buildMeta (rest, mscore, mpace, miles7) =
 trailingOne :: Integer -> Run -> State [Run] Float
 trailingOne windowSize nextRun =
   state $ (\rs -> (foldr (\candidate (distAcc, outAcc) ->
-                           if (diffDays (date nextRun) (date candidate) <= windowSize)
+                           if (diffDays (date nextRun) (date candidate) < windowSize)
                            then ((distAcc + (distance candidate)), candidate:outAcc)
                            else (distAcc, outAcc)) (0, []) (rs ++ [nextRun])))
 
