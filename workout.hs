@@ -102,16 +102,10 @@ data Identity = Identity{ displayName :: String
 -- Routing / handlers
 --
 
-userWithId :: Connection -> String -> ServerPartT IO (Either String User)
-userWithId conn id = do
-  maybeuser <- liftIO $ findUserById conn id
-  return $ case maybeuser of
-    Nothing -> Left ("No user with id: " ++ id)
-    Just user -> Right user
-
 allPages :: String -> String -> String -> String -> String -> ServerPartT IO Response
 allPages googleClientId googleClientSecret adminKind adminId mysqlHost =
   withHost (\host -> do
+               decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
                conn <- liftIO $ dbConnect mysqlHost
                redirectUrl <- return $ "http://" ++ host ++ "/handlelogin"
                msum [ loggedInPages conn googleClientId adminKind adminId
@@ -124,7 +118,6 @@ allPages googleClientId googleClientSecret adminKind adminId mysqlHost =
 loggedInPages :: Connection -> String -> String -> String -> ServerPartT IO Response
 loggedInPages conn googleClientId adminKind adminId = do
   user <- (readCookieValue "userid") `checkRqM` (userWithId conn)
-  decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
   msum [ dir "admin" $ dir "refreshdb" $ requireAdmin conn adminKind adminId (refreshDbPage conn)
        , dir "admin" $ dir "mkdb" $ requireAdmin conn adminKind adminId (mkDbPage conn)
        , dir "rundata" $ runDataPage conn user
@@ -166,15 +159,6 @@ requireAdmin conn adminKind adminId protectedPage = do
               then protectedPage
               else ok $ toResponse $ simpleMessageHtml "NOT ADMIN"
                         
-
-requireLogin :: Connection -> String -> ServerPartT IO Response -> ServerPartT IO Response
-requireLogin conn loginUrl page = msum
- [ do uid <- readCookieValue "userid"
-      mu <- liftIO $ findUserById conn uid
-      page
- , ok $ toResponse $ notLoggedInHtml loginUrl
- ]
-
 landingPage :: Connection -> String -> ServerPartT IO Response
 landingPage conn googleClientId = do
   uid <- readCookieValue "userid"
@@ -232,6 +216,13 @@ handleMutateRunPage conn user= do
 --
 -- Google login flow
 --
+
+userWithId :: Connection -> String -> ServerPartT IO (Either String User)
+userWithId conn id = do
+  maybeuser <- liftIO $ findUserById conn id
+  return $ case maybeuser of
+    Nothing -> Left ("No user with id: " ++ id)
+    Just user -> Right user
 
 googleLoginUrl :: String -> String -> String -> String
 googleLoginUrl clientid redirect state =
