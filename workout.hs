@@ -104,6 +104,7 @@ data Identity = Identity{ displayName :: String
 userWithId :: Connection -> String -> ServerPartT IO (Either String User)
 userWithId conn id = do
   maybeuser <- liftIO $ findUserById conn id
+  liftIO $ putStrLn (id ++ "[" ++ (show maybeuser) ++ "]")
   return $ case maybeuser of
     Nothing -> Left ("No user with id: " ++ id)
     Just user -> Right user
@@ -117,13 +118,13 @@ allPages googleClientId googleClientSecret adminKind adminId mysqlHost =
                          decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
                          msum [ dir "admin" $ dir "refreshdb" $ requireAdmin conn adminKind adminId (refreshDbPage conn)
                               , dir "admin" $ dir "mkdb" $ requireAdmin conn adminKind adminId (mkDbPage conn)
-                              , dir "rundata" $ runDataPage conn
+                              , dir "rundata" $ runDataPage conn user
                               , dir "editrun" $ editRunFormPage conn
                               , dir "newrun" $ newRunFormPage
                               , dir "handlemutaterun" $ handleMutateRunPage conn
-                              , dir "handlelogin" $ handleLoginPage conn googleClientId googleClientSecret redirectUrl
                               , landingPage conn googleClientId
                               ]
+                    , dir "handlelogin" $ handleLoginPage conn googleClientId googleClientSecret redirectUrl
                     , dir "logout" $ logoutPage
                     , do loginUrl <- return $ googleLoginUrl googleClientId redirectUrl ""
                          ok $ toResponse $ notLoggedInHtml loginUrl
@@ -190,9 +191,9 @@ mkDbPage conn = do
   users <- liftIO $ mkUserTable conn
   ok (toResponse (executeSqlHtml "create table" (runs + users)))
 
-runDataPage :: Connection -> ServerPartT IO Response
-runDataPage conn = do
-  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs ORDER BY date ASC" ()
+runDataPage :: Connection -> User -> ServerPartT IO Response
+runDataPage conn user = do
+  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id FROM happstack.runs WHERE user_id = (?)ORDER BY date ASC" [(userId user)]
   ok (toResponse (dataTableHtml (annotate runs)))
 
 newRunFormPage :: ServerPartT IO Response
