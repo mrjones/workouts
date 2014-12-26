@@ -101,6 +101,13 @@ data Identity = Identity{ displayName :: String
 -- Routing / handlers
 --
 
+userWithId :: Connection -> String -> IO (Either String User)
+userWithId conn id = do
+  maybeuser <- findUserById conn id
+  return $ case maybeuser of
+    Nothing -> Left ("No user with id: " ++ id)
+    Just user -> Right user
+
 allPages :: String -> String -> String -> String -> String -> ServerPartT IO Response
 allPages googleClientId googleClientSecret adminKind adminId mysqlHost =
   withHost (\host -> do
