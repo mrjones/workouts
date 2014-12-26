@@ -31,7 +31,7 @@ import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, local
 import Database.MySQL.Simple
 import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
-import Happstack.Server (dir, nullConf, simpleHTTPWithSocket, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir, mkCookie, addCookie, readCookieValue, CookieLife(Session), lookCookieValue, expireCookie, withHost, port, bindPort)
+import Happstack.Server (dir, nullConf, simpleHTTPWithSocket, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir, mkCookie, addCookie, readCookieValue, CookieLife(Session), lookCookieValue, expireCookie, withHost, port, bindPort, checkRqM)
 import Network.Wreq (post, responseBody, FormParam((:=)))
 import System.Environment (getArgs)
 import System.Locale (defaultTimeLocale)
@@ -101,9 +101,9 @@ data Identity = Identity{ displayName :: String
 -- Routing / handlers
 --
 
-userWithId :: Connection -> String -> IO (Either String User)
+userWithId :: Connection -> String -> ServerPartT IO (Either String User)
 userWithId conn id = do
-  maybeuser <- findUserById conn id
+  maybeuser <- liftIO $ findUserById conn id
   return $ case maybeuser of
     Nothing -> Left ("No user with id: " ++ id)
     Just user -> Right user
@@ -113,30 +113,26 @@ allPages googleClientId googleClientSecret adminKind adminId mysqlHost =
   withHost (\host -> do
                conn <- liftIO $ dbConnect mysqlHost
                redirectUrl <- return $ "http://" ++ host ++ "/handlelogin"
-               loginUrl <- return $ googleLoginUrl googleClientId redirectUrl ""
-               let checkLogin = (requireLogin conn loginUrl) in do
-                 decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
-                 msum [ dir "admin" $ dir "refreshdb" $ requireAdmin conn adminKind adminId (refreshDbPage conn)
-                      , dir "admin" $ dir "mkdb" $ requireAdmin conn adminKind adminId (mkDbPage conn)
-                      , dir "rundata" $ checkLogin (runDataPage conn)
-                      , dir "editrun" $ checkLogin (editRunFormPage conn)
-                      , dir "newrun" $ checkLogin newRunFormPage
-                      , dir "handlemutaterun" $ checkLogin $ handleMutateRunPage conn
-                      , dir "handlelogin" $ handleLoginPage conn googleClientId googleClientSecret redirectUrl
-                      , dir "logout" $ logoutPage
-                      , isLoggedInPage
-                      , checkLogin $ landingPage conn googleClientId
-                      ])
+               msum [ do user <- (readCookieValue "userid") `checkRqM` (userWithId conn)
+                         decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
+                         msum [ dir "admin" $ dir "refreshdb" $ requireAdmin conn adminKind adminId (refreshDbPage conn)
+                              , dir "admin" $ dir "mkdb" $ requireAdmin conn adminKind adminId (mkDbPage conn)
+                              , dir "rundata" $ runDataPage conn
+                              , dir "editrun" $ editRunFormPage conn
+                              , dir "newrun" $ newRunFormPage
+                              , dir "handlemutaterun" $ handleMutateRunPage conn
+                              , dir "handlelogin" $ handleLoginPage conn googleClientId googleClientSecret redirectUrl
+                              , landingPage conn googleClientId
+                              ]
+                    , dir "logout" $ logoutPage
+                    , do loginUrl <- return $ googleLoginUrl googleClientId redirectUrl ""
+                         ok $ toResponse $ notLoggedInHtml loginUrl
+                    ])
 
 logoutPage :: ServerPartT IO Response
 logoutPage = do
   expireCookie "userid"
   seeOther ("/" :: String) $ toResponse ("Logging out..." :: String)
-
-isLoggedInPage :: ServerPartT IO Response
-isLoggedInPage = dir "isloggedin" $ do
-  u <- readCookieValue "userid"
-  ok $ toResponse $ simpleMessageHtml (show (u :: Int))
 
 handleLoginPage :: Connection -> String -> String -> String -> ServerPartT IO Response
 handleLoginPage conn clientid secret redirectUrl = do
