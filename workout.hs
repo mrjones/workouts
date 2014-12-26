@@ -22,7 +22,7 @@ import qualified Data.ByteString.Lazy.Char8 as C8L (fromStrict)
 import qualified Data.ByteString as BS (unpack)
 import qualified Data.ByteString.Base64 as BS64 (decode, decodeLenient)
 import Data.Int (Int64)
-import Data.List (reverse, sort, findIndex, zip4)
+import Data.List (reverse, sort, findIndex, zip4, intersperse, concat)
 import Data.Monoid (mconcat)
 import qualified Data.Text as Text (splitOn, pack, unpack, Text)
 import qualified Data.Text.Lazy as TL (unpack)
@@ -130,8 +130,16 @@ loggedInPages conn googleClientId adminKind adminId = do
        , dir "editrun" $ editRunFormPage conn
        , dir "newrun" $ newRunFormPage
        , dir "handlemutaterun" $ handleMutateRunPage conn user
+       , dir "chart" $ dir "mpw" $ mpwChartPage conn user
        , landingPage conn googleClientId
        ]
+
+mpwChartPage :: Connection -> User -> ServerPartT IO Response
+mpwChartPage conn user = do
+  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE user_id = (?)ORDER BY date ASC" [(userId user)]
+  annotated <- return $ annotate runs
+  ok $ toResponse $ mpwChartHtml annotated user
+
 
 logoutPage :: ServerPartT IO Response
 logoutPage = do
@@ -634,3 +642,32 @@ notLoggedInHtml googleUrl =
       H.title "Welcome!"
     H.body $ do
       H.div $ H.a ! A.href (toValue googleUrl) $ "Login"
+
+jsArray :: String -> String -> String
+jsArray name contents =
+  printf "var %s = [%s];" name contents
+
+jsStr :: Show a => a -> String
+jsStr d = printf "\"%s\"" (show d)
+
+jsDate :: Day -> String
+jsDate date = formatTime defaultTimeLocale "new Date(%Y, %m, %e)" date
+
+mpwChartJs :: [(Run, RunMeta)] -> String
+mpwChartJs runs = concat
+  [ jsArray "miles" $ concat . intersperse "," $ map (show . miles7 . snd) runs
+  , jsArray "dates" $ concat . intersperse "," $ map (jsDate . date . fst) runs
+  , "mpwChart(miles, dates);"
+  ]
+
+mpwChartHtml :: [(Run, RunMeta)] -> User -> H.Html
+mpwChartHtml runs user =
+  H.html $ do
+    H.head $ do
+      H.title "Miles per week"
+      H.script ! A.type_ "text/javascript" ! A.src "https://www.google.com/jsapi" $ ""
+      H.script ! A.type_ "text/javascript" ! A.src "/js/workouts.js" $ ""
+    H.body $ do
+      H.div $ H.toHtml $ mpwChartJs runs
+      H.div ! A.id "chart_div" $ ""
+      H.script ! A.type_ "text/javascript" $ H.toHtml $ mpwChartJs runs
