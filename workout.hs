@@ -558,12 +558,15 @@ dataTableHtml u rs =
       H.script ! A.type_ "text/javascript" ! A.src "/js/workouts.js" $ ""
     H.body $ do
       H.div $ do
-        H.toHtml $ (userName u) ++ " "
+        H.toHtml $ (userName u) ++ " | "
         H.a ! A.href "/logout" $ "Logout"
+        H.toHtml $ (" | " :: String)
+        H.a ! A.href "/newrun" $ "New run"
+        H.toHtml $ (" | " :: String)
+        H.a ! A.href "/chart/mpw" $ "Charts"
       H.table $ do
         dataTableHeader
         mapM_ dataTableRow rs
-      H.a ! A.href "/newrun" $ "New run"
       H.div ! A.id "chart_div" $ ""
 
 dataTableHeader :: H.Html
