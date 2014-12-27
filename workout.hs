@@ -762,12 +762,12 @@ chartJs2 chart runs = concat
   ((++)
    (map (seriesJs chart  runs) (chartSerieses chart))
    [ jsArray ((chartId chart) ++  "_dates") $ concat . intersperse "," $ map (jsDate . date . fst) runs
-   , printf "xyChart('%s', '%s_div' , '%s', %s_dates, [%s]);"
+   , printf "xyChart('%s', '%s_div' , %s_dates, [%s], [%s]);"
      (show (chartKind chart))
      (chartId chart)
-     (chartTitle chart)
      (chartId chart)
      (concat (intersperse "," (map (genId chart) (chartSerieses chart))))
+     (concat (intersperse "," (map (show . seriesLabel) (chartSerieses chart))))
    ])
 
 chartHtml2 :: Chart -> [(Run, RunMeta)] -> H.Html

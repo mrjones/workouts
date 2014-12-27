@@ -1,11 +1,11 @@
 google.load('visualization', '1.0', {'packages':['corechart']});
 
-function xyChart(kind, div_name, title, dates, ys) {
+function xyChart(kind, div_name, dates, ys, labels) {
     var data = new google.visualization.DataTable();
     data.addColumn("date", "Date");
     
-    for (var c = 0; c < ys.length; c++) {
-        data.addColumn("number", title);
+    for (var c = 0; c < labels.length; c++) {
+        data.addColumn("number", labels[c]);
     }
 
     for (var r = 0; r < dates.length; r++) {
