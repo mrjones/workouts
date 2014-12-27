@@ -737,13 +737,13 @@ jsStr d = printf "\"%s\"" (show d)
 jsDate :: Day -> String
 jsDate date = formatTime defaultTimeLocale "new Date(%Y, (%m - 1), %e)" date
 
-data ChartKind = Line | Scatter deriving (Show)
-
 mpwChartJs :: [(Run, RunMeta)] -> String
 mpwChartJs runs = chartJs Line "Miles (last 7)" "mpw" (show . miles7 . snd) runs
 
 paceChartJs :: [(Run, RunMeta)] -> String
 paceChartJs runs = chartJs Scatter "Pace (MpH)" "pace" (show . mph . fst) runs
+
+data ChartKind = Line | Scatter deriving (Show)
 
 data Series = Series { seriesLabel :: String
                      , seriesDataFn :: ((Run, RunMeta) -> String)
@@ -799,9 +799,9 @@ mpwChartHtml runs user =
     headHtml "Charts"
     H.body $ do
       headerBarHtml user
-      chartHtml Line "Miles (last 7)" "mpw7" (show . miles7 . snd) runs
-      chartHtml Line "Miles (last 56)" "mpw56" (show . miles56 . snd) runs
-      chartHtml Scatter "Pace (mph)" "mph" (show . mph . fst) runs
+      chartHtml2 (Chart [Series "MPW" (show . miles7 . snd)] "Miles per week" Line "mpw7") runs
+      chartHtml2 (Chart [Series "MPW (last 8w)" (show . miles56 . snd)] "Miles Per Week (8 weeks)" Line "mpw56") runs
+      chartHtml2 (Chart [Series "Pace (mph)" (show . mph . fst)] "Pace (mph)" Scatter "mph") runs
 
 importFormHtml :: H.Html
 importFormHtml =
