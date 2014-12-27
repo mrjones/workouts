@@ -1,12 +1,12 @@
 google.load('visualization', '1.0', {'packages':['corechart']});
 
-function xyChart(kind, div_name, title, dates, mileage) {
+function xyChart(kind, div_name, title, dates, ys) {
     var data = new google.visualization.DataTable();
     data.addColumn("date", "Date");
     data.addColumn("number", title);
 
-    for (var i = 0; i < mileage.length; i++) {
-        data.addRow([dates[i], mileage[i]]);
+    for (var i = 0; i < ys.length; i++) {
+        data.addRow([dates[i], ys[i]]);
     }
 
     var options = {

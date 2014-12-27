@@ -745,12 +745,44 @@ mpwChartJs runs = chartJs Line "Miles (last 7)" "mpw" (show . miles7 . snd) runs
 paceChartJs :: [(Run, RunMeta)] -> String
 paceChartJs runs = chartJs Scatter "Pace (MpH)" "pace" (show . mph . fst) runs
 
+data Series = Series { seriesLabel :: String
+                     , seriesDataFn :: ((Run, RunMeta) -> String)
+                     }
+
+data Chart = Chart { chartSerieses :: [Series]
+                   , chartTitle :: String
+                   , chartKind :: ChartKind
+                   , chartId :: String
+                   }
+
 chartJs :: ChartKind -> String -> String -> ((Run, RunMeta) -> String) -> [(Run, RunMeta)] -> String
 chartJs kind title id f runs = concat
-  [ jsArray id "miles" $ concat . intersperse "," $ map f runs
+  [ jsArray id "ys" $ concat . intersperse "," $ map f runs
   , jsArray id "dates" $ concat . intersperse "," $ map (jsDate . date . fst) runs
-  , printf "xyChart('%s', '%s_div' , '%s', %s_dates, %s_miles);" (show kind) id title id id
+  , printf "xyChart('%s', '%s_div' , '%s', %s_dates, %s_ys);" (show kind) id title id id
   ]
+
+seriesJs :: String -> [(Run, RunMeta)] -> Series -> String
+seriesJs chartId runs series =
+  jsArray chartId "ys" $ concat . intersperse "," $ map (seriesDataFn series) runs
+
+chartJs2 :: Chart -> [(Run, RunMeta)] -> String
+chartJs2 chart runs = concat
+  ((++)
+   (map (seriesJs (chartId chart) runs) (chartSerieses chart))
+   [ jsArray (chartId chart) "dates" $ concat . intersperse "," $ map (jsDate . date . fst) runs
+   , printf "xyChart('%s', '%s_div' , '%s', %s_dates, %s_ys);" (show (chartKind chart)) (chartId chart) (chartTitle chart) (chartId chart) (chartId chart)
+   ])
+
+chartHtml2 :: Chart -> [(Run, RunMeta)] -> H.Html
+chartHtml2 chart runs =
+  let divname = (chartId chart) ++ "_div"
+  in do
+    H.h3 $ H.toHtml (chartTitle chart)
+    H.div ! A.id (toValue divname) $ ""
+    H.script ! A.type_ "text/javascript" $ H.toHtml $
+      chartJs2 chart runs
+  
 
 chartHtml :: ChartKind -> String -> String -> ((Run, RunMeta) -> String) -> [(Run, RunMeta)]-> H.Html
 chartHtml kind title id f runs =
