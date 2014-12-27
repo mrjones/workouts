@@ -133,6 +133,7 @@ allPages wc =
                msum [ dir "logout" $ logoutPage
                     , dir "js" $ serveFile (asContentType "text/javascript") "static/js/workouts.js"
                     , dir "css" $ serveFile (asContentType "text/css") "static/css/workouts.css"
+                    , dir "admin" $ dir "mkdb" $ mkDbPage conn
                     , loggedInPages conn (wcGoogleClientId wc) (wcAdminKind wc) (wcAdminId wc)
                     , dir "handlelogin" $ handleLoginPage conn (wcGoogleClientId wc) (wcGoogleClientSecret wc) redirectUrl
                     , do loginUrl <- return $ googleLoginUrl (wcGoogleClientId wc) redirectUrl ""
@@ -143,7 +144,6 @@ loggedInPages :: Connection -> String -> String -> String -> ServerPartT IO Resp
 loggedInPages conn googleClientId adminKind adminId = do
   user <- (readCookieValue "userid") `checkRqM` (userWithId conn)
   msum [ dir "admin" $ dir "refreshdb" $ requireAdmin conn adminKind adminId (refreshDbPage conn)
-       , dir "admin" $ dir "mkdb" $ requireAdmin conn adminKind adminId (mkDbPage conn)
        , dir "rundata" $ runDataPage conn user
        , dir "editrun" $ editRunFormPage conn user
        , dir "newrun" $ newRunFormPage user
@@ -368,12 +368,12 @@ getGoogleId clientid secret code redirectUrl = do
 
 findOrInsertGoogleUser :: Connection -> String -> String -> IO (Maybe User)
 findOrInsertGoogleUser conn email sub = do
-  googleUsers <- query conn "SELECT google_email, google_id FROM happstack.google_users WHERE google_id = (?)" [sub] :: IO [GoogleUser]
-  case googleUsers :: [GoogleUser] of
-    [] -> insertGoogleUser conn email sub
-    -- TODO(mrjones): return an error if us?
-    _ -> return (-1)
-  findGoogleUser conn sub
+  fromDb <- findGoogleUser conn sub
+  case fromDb of
+    Nothing -> do n <- insertGoogleUser conn email sub
+                  findGoogleUser conn sub
+    Just u -> return $ Just u
+
 
 findUserById :: Connection -> String -> IO (Maybe User)
 findUserById conn id = do
@@ -391,10 +391,8 @@ findGoogleUser conn sub = do
 
 
 insertGoogleUser :: Connection -> String -> String -> IO Int64
-insertGoogleUser conn email sub = do
-  n <- execute conn "INSERT INTO happstack.google_users (google_email, google_id) VALUES (?, ?)" (email, sub)
-  case n of
-    1 -> execute conn "INSERT INTO happstack.users (display, kind, foreign_id) VALUES (?, 'google', ?)" (email, sub)
+insertGoogleUser conn email sub =
+    execute conn "INSERT INTO happstack.users (display, kind, foreign_id) VALUES (?, 'google', ?)" (email, sub)
 
 --
 -- Misc application logic
@@ -570,21 +568,17 @@ storeRun2 conn r kind =
 dropTable :: Connection -> IO Int64
 dropTable conn = do
   execute conn "DROP TABLE happstack.runs" ()
-  execute conn "DROP TABLE happstack.google_users;" ()
   execute conn "DROP TABLE happstack.users;" ()
 
 mkUserTable :: Connection -> IO Int64
 mkUserTable conn = do
-  execute conn "CREATE TABLE happstack.google_users (\
-               \ google_email VARCHAR(255),\
-               \ google_id VARCHAR(255),\
-               \ PRIMARY KEY (google_id))" ()
   execute conn "CREATE TABLE happstack.users (\
                \ id INT NOT NULL AUTO_INCREMENT,\
                \ display VARCHAR(255),\
                \ kind VARCHAR(255),\
                \ foreign_id VARCHAR(255),\
-               \ PRIMARY KEY (id))" ()
+               \ PRIMARY KEY (id), \
+               \ UNIQUE (kind, foreign_id))" ()
 
 mkRunTable :: Connection -> IO Int64
 mkRunTable conn = do
