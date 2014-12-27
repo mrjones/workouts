@@ -162,9 +162,7 @@ instance CSV.FromNamedRecord CsvRunRecord where
 parseCsvRun :: User -> CsvRunRecord -> Maybe Run
 parseCsvRun owner csv = do
   date <- parseDateDDMMYYYYslash (csvRunDate csv)
-  duration <- return $ case parseDuration (csvRunDuration csv) of
-    Nothing -> 0
-    Just d -> d
+  duration <- parseDuration (csvRunDuration csv)
   inc <- return $ case csvRunIncline csv of
     Nothing -> 0.0
     Just i -> i
