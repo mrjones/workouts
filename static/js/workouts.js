@@ -3,10 +3,17 @@ google.load('visualization', '1.0', {'packages':['corechart']});
 function xyChart(kind, div_name, title, dates, ys) {
     var data = new google.visualization.DataTable();
     data.addColumn("date", "Date");
-    data.addColumn("number", title);
+    
+    for (var c = 0; c < ys.length; c++) {
+        data.addColumn("number", title);
+    }
 
-    for (var i = 0; i < ys.length; i++) {
-        data.addRow([dates[i], ys[i]]);
+    for (var r = 0; r < dates.length; r++) {
+        var row = [dates[r]];
+        for (var c = 0; c < ys.length; c++) {
+            row.push(ys[c][r]);
+        }
+        data.addRow(row);
     }
 
     var options = {
