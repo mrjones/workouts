@@ -132,6 +132,7 @@ allPages wc =
                redirectUrl <- return $ "http://" ++ host ++ "/handlelogin"
                msum [ dir "logout" $ logoutPage
                     , dir "js" $ serveFile (asContentType "text/javascript") "static/js/workouts.js"
+                    , dir "css" $ serveFile (asContentType "text/css") "static/css/workouts.css"
                     , loggedInPages conn (wcGoogleClientId wc) (wcAdminKind wc) (wcAdminId wc)
                     , dir "handlelogin" $ handleLoginPage conn (wcGoogleClientId wc) (wcGoogleClientSecret wc) redirectUrl
                     , do loginUrl <- return $ googleLoginUrl (wcGoogleClientId wc) redirectUrl ""
@@ -144,8 +145,8 @@ loggedInPages conn googleClientId adminKind adminId = do
   msum [ dir "admin" $ dir "refreshdb" $ requireAdmin conn adminKind adminId (refreshDbPage conn)
        , dir "admin" $ dir "mkdb" $ requireAdmin conn adminKind adminId (mkDbPage conn)
        , dir "rundata" $ runDataPage conn user
-       , dir "editrun" $ editRunFormPage conn
-       , dir "newrun" $ newRunFormPage
+       , dir "editrun" $ editRunFormPage conn user
+       , dir "newrun" $ newRunFormPage user
        , dir "handlemutaterun" $ handleMutateRunPage conn user
        , dir "chart" $ dir "mpw" $ mpwChartPage conn user
        , dir "import" $ importFormPage
@@ -261,18 +262,18 @@ runDataPage conn user = do
   runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE user_id = (?)ORDER BY date ASC" [(userId user)]
   ok (toResponse (dataTableHtml user (annotate runs)))
 
-newRunFormPage :: ServerPartT IO Response
-newRunFormPage = do
+newRunFormPage :: User -> ServerPartT IO Response
+newRunFormPage user = do
   tz <- liftIO $ getCurrentTimeZone
   utcNow <- liftIO $ getCurrentTime
   today <- return $ localDay $ utcToLocalTime tz utcNow
-  ok $ toResponse $ runDataHtml Nothing today Create
+  ok $ toResponse $ runDataHtml user Nothing today Create
 
-editRunFormPage :: Connection -> ServerPartT IO Response
-editRunFormPage conn = do
+editRunFormPage :: Connection -> User -> ServerPartT IO Response
+editRunFormPage conn user = do
   id <- queryString $ look "id"
   runs <- liftIO $ (query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE id = (?)" [id])
-  ok $ toResponse $ runDataHtml (Just (head runs)) (fromGregorian 2014 1 1) Modify
+  ok $ toResponse $ runDataHtml user (Just (head runs)) (fromGregorian 2014 1 1) Modify
 
 handleMutateRunPage :: Connection -> User -> ServerPartT IO Response
 handleMutateRunPage conn user= do
@@ -599,27 +600,43 @@ mkRunTable conn = do
 --
 -- HTML Templates
 --
-  
+
+headHtml :: String -> H.Html
+headHtml title =
+  H.head $ do
+    H.title $ H.toHtml title
+    H.script ! A.type_ "text/javascript" ! A.src "/js/workouts.js" $ ""
+    H.script ! A.type_ "text/javascript" ! A.src "https://www.google.com/jsapi" $ ""
+    H.link ! A.rel "stylesheet" ! A.type_ "text/css" ! A.href "/css/workouts.css"
+
 executeSqlHtml :: String -> Int64 -> H.Html
 executeSqlHtml opname _ =
   H.html $ do
-    H.head $ do
-      H.title $ "executed database op"
+    headHtml "Executed database op"
     H.body $ H.toHtml opname
 
 simpleMessageHtml :: String -> H.Html
 simpleMessageHtml msg =
   H.html $ do
-    H.head $ do
-      H.title $ "Hello, world!"
+    headHtml "Hello, world!"
     H.body $ do
       H.toHtml msg
+
+headerBarHtml :: User -> H.Html
+headerBarHtml user = H.div $ do
+  H.toHtml $ (userName user) ++ " | "
+  H.a ! A.href "/logout" $ "Logout"
+  H.toHtml $ (" | " :: String)
+  H.a ! A.href "/newrun" $ "New run"
+  H.toHtml $ (" | " :: String)
+  H.a ! A.href "/rundata" $ "All runs"
+  H.toHtml $ (" | " :: String)
+  H.a ! A.href "/chart/mpw" $ "Charts"
 
 landingPageHtml :: Maybe User -> H.Html
 landingPageHtml muser =
   H.html $ do
-    H.head $ do
-      H.title $ "Workout Database"
+    headHtml "Workout database"
     H.body $ case muser of
         Just user -> do
           H.div $ H.toHtml $ userName user
@@ -631,18 +648,9 @@ landingPageHtml muser =
 dataTableHtml :: User -> [(Run, RunMeta)] -> H.Html
 dataTableHtml u rs =
   H.html $ do
-    H.head $ do
-      H.title $ "Data"
-      H.script ! A.type_ "text/javascript" ! A.src "https://www.google.com/jsapi" $ ""
-      H.script ! A.type_ "text/javascript" ! A.src "/js/workouts.js" $ ""
+    headHtml "Run data"
     H.body $ do
-      H.div $ do
-        H.toHtml $ (userName u) ++ " | "
-        H.a ! A.href "/logout" $ "Logout"
-        H.toHtml $ (" | " :: String)
-        H.a ! A.href "/newrun" $ "New run"
-        H.toHtml $ (" | " :: String)
-        H.a ! A.href "/chart/mpw" $ "Charts"
+      headerBarHtml u
       H.table $ do
         dataTableHeader
         mapM_ dataTableRow rs
@@ -674,12 +682,12 @@ dataTableRow (r,meta) = H.tr $ do
     H.a ! A.href (toValue ("/editrun?id=" ++ (show (runid r)))) $ "Edit"
     "]"
 
-runDataHtml :: Maybe Run -> Day -> MutationKind -> H.Html
-runDataHtml run today mutationKind =
+runDataHtml :: User -> Maybe Run -> Day -> MutationKind -> H.Html
+runDataHtml user run today mutationKind =
   H.html $ do
-    H.head $ do
-      H.title "New Run"
+    headHtml "New run"
     H.body $ do
+      headerBarHtml user
       H.form ! A.method "post" ! A.action "/handlemutaterun" $ do
         H.input ! A.type_ "hidden"
                 ! A.name "id"
@@ -721,8 +729,7 @@ runDataFormRow mrun (name, id, formType, defaultValue, extractValue, extraAs) =
 notLoggedInHtml :: String -> H.Html
 notLoggedInHtml googleUrl =
   H.html $ do
-    H.head $ do
-      H.title "Welcome!"
+    headHtml "Please log in."
     H.body $ do
       H.div $ H.a ! A.href (toValue googleUrl) $ "Login"
 
@@ -763,11 +770,9 @@ chartHtml kind title id f runs =
 mpwChartHtml :: [(Run, RunMeta)] -> User -> H.Html
 mpwChartHtml runs user =
   H.html $ do
-    H.head $ do
-      H.title "Miles per week"
-      H.script ! A.type_ "text/javascript" ! A.src "https://www.google.com/jsapi" $ ""
-      H.script ! A.type_ "text/javascript" ! A.src "/js/workouts.js" $ ""
+    headHtml "Charts"
     H.body $ do
+      headerBarHtml user
       chartHtml Line "Miles (last 7)" "mpw7" (show . miles7 . snd) runs
       chartHtml Line "Miles (last 56)" "mpw56" (show . miles56 . snd) runs
       chartHtml Scatter "Pace (mph)" "mph" (show . mph . fst) runs
@@ -775,8 +780,7 @@ mpwChartHtml runs user =
 importFormHtml :: H.Html
 importFormHtml =
   H.html $ do
-    H.head $ do
-      H.title "Import data"
+    headHtml "Import data"
     H.body $ do
       H.form ! A.method "post"
              ! A.action "/handleimport"
