@@ -151,7 +151,7 @@ loggedInPages conn googleClientId adminKind adminId = do
        , dir "chart" $ dir "mpw" $ mpwChartPage conn user
        , dir "import" $ importFormPage
        , dir "handleimport" $ handleImportPage conn user
-       , landingPage conn googleClientId
+       , runDataPage conn user
        ]
 
 importFormPage :: ServerPartT IO Response
@@ -608,6 +608,7 @@ headHtml title =
     H.script ! A.type_ "text/javascript" ! A.src "https://www.google.com/jsapi" $ ""
     H.script ! A.type_ "text/javascript" ! A.src "/js/workouts.js" $ ""
     H.link ! A.rel "stylesheet" ! A.type_ "text/css" ! A.href "/css/workouts.css"
+    H.link ! A.rel "stylesheet" ! A.type_ "text/css" ! A.href "http://fonts.googleapis.com/css?family=Roboto:400,700"
 
 executeSqlHtml :: String -> Int64 -> H.Html
 executeSqlHtml opname _ =
