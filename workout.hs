@@ -727,9 +727,9 @@ notLoggedInHtml googleUrl =
     H.body $ do
       H.div $ H.a ! A.href (toValue googleUrl) $ "Login"
 
-jsArray :: String -> String -> String -> String
-jsArray prefix name contents =
-  printf "var %s_%s = [%s];" prefix name contents
+jsArray :: String -> String -> String
+jsArray name contents =
+  printf "var %s = [%s];" name contents
 
 jsStr :: Show a => a -> String
 jsStr d = printf "\"%s\"" (show d)
@@ -737,16 +737,11 @@ jsStr d = printf "\"%s\"" (show d)
 jsDate :: Day -> String
 jsDate date = formatTime defaultTimeLocale "new Date(%Y, (%m - 1), %e)" date
 
-mpwChartJs :: [(Run, RunMeta)] -> String
-mpwChartJs runs = chartJs Line "Miles (last 7)" "mpw" (show . miles7 . snd) runs
-
-paceChartJs :: [(Run, RunMeta)] -> String
-paceChartJs runs = chartJs Scatter "Pace (MpH)" "pace" (show . mph . fst) runs
-
 data ChartKind = Line | Scatter deriving (Show)
 
 data Series = Series { seriesLabel :: String
                      , seriesDataFn :: ((Run, RunMeta) -> String)
+                     , seriesId :: String
                      }
 
 data Chart = Chart { chartSerieses :: [Series]
@@ -755,23 +750,24 @@ data Chart = Chart { chartSerieses :: [Series]
                    , chartId :: String
                    }
 
-chartJs :: ChartKind -> String -> String -> ((Run, RunMeta) -> String) -> [(Run, RunMeta)] -> String
-chartJs kind title id f runs = concat
-  [ jsArray id "ys" $ concat . intersperse "," $ map f runs
-  , jsArray id "dates" $ concat . intersperse "," $ map (jsDate . date . fst) runs
-  , printf "xyChart('%s', '%s_div' , '%s', %s_dates, %s_ys);" (show kind) id title id id
-  ]
+genId :: Chart -> Series -> String
+genId chart series = printf "%s_%s" (chartId chart) (seriesId series)
 
-seriesJs :: String -> [(Run, RunMeta)] -> Series -> String
-seriesJs chartId runs series =
-  jsArray chartId "ys" $ concat . intersperse "," $ map (seriesDataFn series) runs
+seriesJs :: Chart -> [(Run, RunMeta)] -> Series -> String
+seriesJs chart runs series =
+  jsArray (genId chart series) $ concat . intersperse "," $ map (seriesDataFn series) runs
 
 chartJs2 :: Chart -> [(Run, RunMeta)] -> String
 chartJs2 chart runs = concat
   ((++)
-   (map (seriesJs (chartId chart) runs) (chartSerieses chart))
-   [ jsArray (chartId chart) "dates" $ concat . intersperse "," $ map (jsDate . date . fst) runs
-   , printf "xyChart('%s', '%s_div' , '%s', %s_dates, %s_ys);" (show (chartKind chart)) (chartId chart) (chartTitle chart) (chartId chart) (chartId chart)
+   (map (seriesJs chart  runs) (chartSerieses chart))
+   [ jsArray ((chartId chart) ++  "_dates") $ concat . intersperse "," $ map (jsDate . date . fst) runs
+   , printf "xyChart('%s', '%s_div' , '%s', %s_dates, %s);"
+     (show (chartKind chart))
+     (chartId chart)
+     (chartTitle chart)
+     (chartId chart)
+     (genId chart (head (chartSerieses chart)))
    ])
 
 chartHtml2 :: Chart -> [(Run, RunMeta)] -> H.Html
@@ -782,16 +778,6 @@ chartHtml2 chart runs =
     H.div ! A.id (toValue divname) $ ""
     H.script ! A.type_ "text/javascript" $ H.toHtml $
       chartJs2 chart runs
-  
-
-chartHtml :: ChartKind -> String -> String -> ((Run, RunMeta) -> String) -> [(Run, RunMeta)]-> H.Html
-chartHtml kind title id f runs =
-  let divname = id ++ "_div"
-  in do
-    H.h3 $ H.toHtml title
-    H.div ! A.id (toValue divname) $ ""
-    H.script ! A.type_ "text/javascript" $ H.toHtml $
-      chartJs kind title id f runs
 
 mpwChartHtml :: [(Run, RunMeta)] -> User -> H.Html
 mpwChartHtml runs user =
@@ -799,9 +785,9 @@ mpwChartHtml runs user =
     headHtml "Charts"
     H.body $ do
       headerBarHtml user
-      chartHtml2 (Chart [Series "MPW" (show . miles7 . snd)] "Miles per week" Line "mpw7") runs
-      chartHtml2 (Chart [Series "MPW (last 8w)" (show . miles56 . snd)] "Miles Per Week (8 weeks)" Line "mpw56") runs
-      chartHtml2 (Chart [Series "Pace (mph)" (show . mph . fst)] "Pace (mph)" Scatter "mph") runs
+      chartHtml2 (Chart [Series "MPW" (show . miles7 . snd) "7"] "Miles per week" Line "mpw7") runs
+      chartHtml2 (Chart [Series "MPW (last 8w)" (show . miles56 . snd) "56"] "Miles Per Week (8 weeks)" Line "mpw56") runs
+      chartHtml2 (Chart [Series "Pace (mph)" (show . mph . fst) "pace"] "Pace (mph)" Scatter "mph") runs
 
 importFormHtml :: H.Html
 importFormHtml =
