@@ -26,7 +26,7 @@ import qualified Data.ByteString.Base64 as BS64 (decode, decodeLenient)
 import qualified Data.Csv as CSV (decodeByName, FromNamedRecord(..), (.:), Parser(..), NamedRecord(..), lookup)
 import Data.Int (Int64)
 import qualified Data.HashMap.Strict as HM (HashMap(..), keys, lookup)
-import Data.List (reverse, sort, findIndex, zip4, intersperse, concat)
+import Data.List (reverse, sort, findIndex, zip5, intersperse, concat)
 import Data.Monoid (mconcat)
 import qualified Data.Text as Text (splitOn, pack, unpack, Text)
 import qualified Data.Text.Lazy as TL (unpack)
@@ -77,7 +77,7 @@ main = do
 workoutMain :: WorkoutConf -> IO ()
 workoutMain wc = do
   let httpConf = nullConf {  port = wcPort wc }
-  socket <- bindPort httpConf
+  socket <- bindPort nullConf { port = wcPort wc }
   simpleHTTPWithSocket socket httpConf $ allPages wc
 
 
@@ -89,6 +89,7 @@ data RunMeta = RunMeta { daysOff :: Integer
                        , scoreRank :: Int
                        , paceRank :: Int
                        , miles7 :: Float
+                       , miles56 :: Float
                        }
 
 data Run = Run { distance :: Float
@@ -403,21 +404,22 @@ annotate rs = zip rs (annotate2 rs)
 
 annotate2 :: [Run] -> [RunMeta]
 annotate2 rs = map buildMeta
-               (zip4
+               (zip5
                 (computeRest (map date rs))
                 (rankDesc (map scoreRun rs))
                 (rankAsc (map pace rs))
-                (trailingMileage 7 rs))
+                (trailingMileage 7 rs)
+                (trailingMileage 56 rs))
 
-buildMeta :: (Integer, Maybe Int, Maybe Int, Float) -> RunMeta
-buildMeta (rest, mscore, mpace, miles7) =
+buildMeta :: (Integer, Maybe Int, Maybe Int, Float, Float) -> RunMeta
+buildMeta (rest, mscore, mpace, miles7, miles56) =
   let score = case mscore of
         Just s -> s + 1
         Nothing -> 0
       pace = case mpace of
         Just p -> p + 1
         Nothing -> 0
-  in RunMeta rest score pace miles7
+  in RunMeta rest score pace miles7 miles56
 
 
 trailingOne :: Integer -> Run -> State [Run] Float
@@ -766,7 +768,8 @@ mpwChartHtml runs user =
       H.script ! A.type_ "text/javascript" ! A.src "https://www.google.com/jsapi" $ ""
       H.script ! A.type_ "text/javascript" ! A.src "/js/workouts.js" $ ""
     H.body $ do
-      chartHtml Line "Miles (last 7)" "mpw" (show . miles7 . snd) runs
+      chartHtml Line "Miles (last 7)" "mpw7" (show . miles7 . snd) runs
+      chartHtml Line "Miles (last 56)" "mpw56" (show . miles56 . snd) runs
       chartHtml Scatter "Pace (mph)" "mph" (show . mph . fst) runs
 
 importFormHtml :: H.Html
