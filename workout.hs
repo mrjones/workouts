@@ -646,11 +646,12 @@ dataTableHeader :: H.Html
 dataTableHeader =
   H.thead $ H.tr $ do
     mconcat $ map (H.td . H.b)
-      ["Date", "Dist", "Time", "Incline", "Pace", "MpH", "Rest", "Score", "Score Rank", "Pace Rank", "Miles7", "Comment", "Edit"]
+      ["Date", "Day", "Dist", "Time", "Incline", "Pace", "MpH", "Rest", "Score", "Score Rank", "Pace Rank", "Miles7", "Comment", "Edit"]
 
 dataTableRow :: (Run, RunMeta) -> H.Html
 dataTableRow (r,meta) = H.tr $ do
-  H.td $ H.toHtml $ show $ date r
+  H.td $ H.toHtml $ formatTime defaultTimeLocale "%Y-%b-%d" (date r)
+  H.td $ H.toHtml $ formatTime defaultTimeLocale "%a" (date r)
   H.td $ H.toHtml $ show $ distance r
   H.td $ H.toHtml $ printDuration $ duration r
   H.td $ H.toHtml $ show $ incline r
@@ -660,7 +661,7 @@ dataTableRow (r,meta) = H.tr $ do
   H.td $ H.toHtml $ show $ round (scoreRun r)
   H.td $ H.toHtml $ show $ scoreRank meta
   H.td $ H.toHtml $ show $ paceRank meta
-  H.td $ H.toHtml (printf "%.2f" (miles7 meta) :: String)
+  H.td $ H.toHtml (printf "%.1f" (miles7 meta) :: String)
   H.td $ H.toHtml $ comment r
   H.td $ do
     "["
