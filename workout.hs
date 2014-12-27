@@ -52,6 +52,13 @@ import Text.Printf (printf)
 import Text.Read (readMaybe)
 import Web.JWT (decode, claims, header, signature)
 
+data WorkoutConf = WorkoutConf { wcGoogleClientId :: String
+                               , wcGoogleClientSecret :: String
+                               , wcAdminKind :: String
+                               , wcAdminId :: String
+                               , wcPort :: Int
+                               , wcMysqlHost :: String } deriving (Show)   
+
 main:: IO()
 main = do
   args <- getArgs
@@ -60,15 +67,19 @@ main = do
   putStrLn $ "Using google client secret: " ++ googleClientSecret
   putStrLn $ "Using admin kind: " ++ adminKind
   putStrLn $ "Using admin id: " ++ adminId
-  putStrLn $ "Using admin id: " ++ adminId
   putStrLn $ "Using port: " ++ (show portS)
   putStrLn $ "Using mysql host: " ++ mysqlHost
   case (readMaybe portS :: Maybe Int) of
     Nothing -> fail "Couldn't parse port"
     Just p -> do
-      let conf = nullConf { port = p }
-      socket <- bindPort conf
-      simpleHTTPWithSocket socket conf $ allPages googleClientId googleClientSecret adminKind adminId mysqlHost
+      workoutMain $ WorkoutConf googleClientId googleClientSecret adminKind adminId p mysqlHost
+
+workoutMain :: WorkoutConf -> IO ()
+workoutMain wc = do
+  let httpConf = nullConf {  port = wcPort wc }
+  socket <- bindPort httpConf
+  simpleHTTPWithSocket socket httpConf $ allPages wc
+
 
 --
 -- Data types
@@ -112,17 +123,17 @@ data Identity = Identity{ displayName :: String
 mb :: Int64
 mb = 1024 * 1024
 
-allPages :: String -> String -> String -> String -> String -> ServerPartT IO Response
-allPages googleClientId googleClientSecret adminKind adminId mysqlHost =
+allPages :: WorkoutConf -> ServerPartT IO Response
+allPages wc =
   withHost (\host -> do
                decodeBody (defaultBodyPolicy "/tmp" (10 * mb) (10 * mb) (10 * mb))
-               conn <- liftIO $ dbConnect mysqlHost
+               conn <- liftIO $ dbConnect (wcMysqlHost wc)
                redirectUrl <- return $ "http://" ++ host ++ "/handlelogin"
                msum [ dir "logout" $ logoutPage
                     , dir "js" $ serveFile (asContentType "text/javascript") "static/js/workouts.js"
-                    , loggedInPages conn googleClientId adminKind adminId
-                    , dir "handlelogin" $ handleLoginPage conn googleClientId googleClientSecret redirectUrl
-                    , do loginUrl <- return $ googleLoginUrl googleClientId redirectUrl ""
+                    , loggedInPages conn (wcGoogleClientId wc) (wcAdminKind wc) (wcAdminId wc)
+                    , dir "handlelogin" $ handleLoginPage conn (wcGoogleClientId wc) (wcGoogleClientSecret wc) redirectUrl
+                    , do loginUrl <- return $ googleLoginUrl (wcGoogleClientId wc) redirectUrl ""
                          ok $ toResponse $ notLoggedInHtml loginUrl
                     ])
 
