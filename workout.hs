@@ -5,6 +5,7 @@
 -- cabal install happstack
 -- cabal install wreq
 -- cabal install jwt
+-- cabal install cassava
 
 -- sudo iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80 -j REDIRECT --to-port 8000
 
@@ -13,15 +14,18 @@ import Control.Lens ((^.), (^..))
 import Control.Monad (msum,mzero)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State.Lazy (State, state, get, runState)
-import Data.Aeson ((.:))
+import qualified Data.Aeson as J ((.:))
 import Data.Aeson hiding (decode)
 import qualified Data.Aeson as JSON (decode, FromJSON(..), Object(..))
 import Data.Aeson.Lens (key, _String, values)
 import qualified Data.ByteString.Char8 as C8 (pack,unpack,ByteString,length,append)
 import qualified Data.ByteString.Lazy.Char8 as C8L (fromStrict)
+import qualified Data.ByteString.Lazy as BL (readFile)
 import qualified Data.ByteString as BS (unpack)
 import qualified Data.ByteString.Base64 as BS64 (decode, decodeLenient)
+import qualified Data.Csv as CSV (decodeByName, FromNamedRecord(..), (.:), Parser(..), NamedRecord(..), lookup)
 import Data.Int (Int64)
+import qualified Data.HashMap.Strict as HM (HashMap(..), keys, lookup)
 import Data.List (reverse, sort, findIndex, zip4, intersperse, concat)
 import Data.Monoid (mconcat)
 import qualified Data.Text as Text (splitOn, pack, unpack, Text)
@@ -31,10 +35,11 @@ import Data.Time.Calendar (Day, fromGregorianValid, fromGregorian, diffDays)
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (formatTime, FormatTime)
 import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, localDay)
+import qualified Data.Vector as Vector (forM_, forM)
 import Database.MySQL.Simple
 import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
-import Happstack.Server (dir, nullConf, simpleHTTPWithSocket, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir, mkCookie, addCookie, readCookieValue, CookieLife(Session), lookCookieValue, expireCookie, withHost, port, bindPort, checkRqM, serveFile, asContentType)
+import Happstack.Server (dir, nullConf, simpleHTTPWithSocket, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir, mkCookie, addCookie, readCookieValue, CookieLife(Session), lookCookieValue, expireCookie, withHost, port, bindPort, checkRqM, serveFile, asContentType, lookFile)
 import Network.Wreq (post, responseBody, FormParam((:=)))
 import System.Environment (getArgs)
 import System.Locale (defaultTimeLocale)
@@ -107,10 +112,13 @@ data Identity = Identity{ displayName :: String
 -- Routing / handlers
 --
 
+mb :: Int64
+mb = 1024 * 1024
+
 allPages :: String -> String -> String -> String -> String -> ServerPartT IO Response
 allPages googleClientId googleClientSecret adminKind adminId mysqlHost =
   withHost (\host -> do
-               decodeBody (defaultBodyPolicy "/tmp" 0 10240 10240)
+               decodeBody (defaultBodyPolicy "/tmp" (10 * mb) (10 * mb) (10 * mb))
                conn <- liftIO $ dbConnect mysqlHost
                redirectUrl <- return $ "http://" ++ host ++ "/handlelogin"
                msum [ dir "logout" $ logoutPage
@@ -131,12 +139,62 @@ loggedInPages conn googleClientId adminKind adminId = do
        , dir "newrun" $ newRunFormPage
        , dir "handlemutaterun" $ handleMutateRunPage conn user
        , dir "chart" $ dir "mpw" $ mpwChartPage conn user
+       , dir "import" $ importFormPage
+       , dir "handleimport" $ handleImportPage conn user
        , landingPage conn googleClientId
        ]
 
+importFormPage :: ServerPartT IO Response
+importFormPage = ok $ toResponse $ importFormHtml
+
+data CsvRunRecord = CsvRunRecord { csvRunDate :: String
+                                 , csvRunDist :: Float
+                                 , csvRunDuration :: String
+                                 , csvRunIncline :: Maybe Float
+                                 , csvRunComment :: Maybe String } deriving (Show)
+
+instance CSV.FromNamedRecord CsvRunRecord where
+  parseNamedRecord record =
+    CsvRunRecord <$>
+    record CSV..: "Date" <*>
+    record CSV..: "Distance" <*>
+    record CSV..: "Time" <*>
+    record CSV..: "Inc" <*>
+    record CSV..: "Comment"
+
+parseCsvRun :: User -> CsvRunRecord -> Maybe Run
+parseCsvRun owner csv = do
+  date <- parseDateDDMMYYYYslash (csvRunDate csv)
+  duration <- return $ case parseDuration (csvRunDuration csv) of
+    Nothing -> 0
+    Just d -> d
+  inc <- return $ case csvRunIncline csv of
+    Nothing -> 0.0
+    Just i -> i
+  comment <- return $ case csvRunComment csv of
+    Nothing -> ""
+    Just c -> c
+  return $ Run (csvRunDist csv) duration date inc comment 0 (userId owner)
+
+handleImportPage :: Connection -> User -> ServerPartT IO Response
+handleImportPage conn user = do
+  (fname, _, _) <- lookFile "filedata"
+  csvData <- liftIO $ BL.readFile fname
+  case CSV.decodeByName csvData of
+    Left err -> ok $ toResponse $ simpleMessageHtml ("ERROR: " ++ err)
+    Right (_, v) -> do
+      liftIO $ Vector.forM v (\r -> do
+                                 run <- return $ (parseCsvRun user r)
+                                 putStrLn $ show run
+                                 storeRun conn run (Just Create))
+      ok $ toResponse $ simpleMessageHtml "foo"
+
+dump :: Maybe Run -> IO ()
+dump r = putStrLn (show r)
+
 mpwChartPage :: Connection -> User -> ServerPartT IO Response
 mpwChartPage conn user = do
-  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE user_id = (?)ORDER BY date ASC" [(userId user)]
+  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE user_id = (?) ORDER BY date ASC" [(userId user)]
   annotated <- return $ annotate runs
   ok $ toResponse $ mpwChartHtml annotated user
 
@@ -249,8 +307,8 @@ data JWTHeader = JWTHeader { alg :: String, kid :: String } deriving (Show)
 
 instance JSON.FromJSON JWTHeader where
   parseJSON (Object o) = JWTHeader <$>
-                              o .: "alg" <*>
-                              o .: "kid"
+                              o J..: "alg" <*>
+                              o J..: "kid"
   parseJSON _ = mzero
 
 data JWTPayload = JWTPayload { iss :: String
@@ -265,15 +323,15 @@ data JWTPayload = JWTPayload { iss :: String
 
 instance JSON.FromJSON JWTPayload where
   parseJSON (Object o) = JWTPayload <$>
-                         o .: "iss" <*>
-                         o .: "at_hash" <*>
-                         o .: "email_verified" <*>
-                         o .: "sub" <*>
-                         o .: "azp" <*>
-                         o .: "email" <*>
-                         o .: "aud" <*>
-                         o .: "iat" <*>
-                         o .: "exp"
+                         o J..: "iss" <*>
+                         o J..: "at_hash" <*>
+                         o J..: "email_verified" <*>
+                         o J..: "sub" <*>
+                         o J..: "azp" <*>
+                         o J..: "email" <*>
+                         o J..: "aud" <*>
+                         o J..: "iat" <*>
+                         o J..: "exp"
 
 jwtDecode :: FromJSON a => Text.Text -> Maybe a
 jwtDecode inTxt =
@@ -400,7 +458,7 @@ parseRun distanceS durationS dateS inclineS commentS idS userId = do
   distance <- readMaybe distanceS :: Maybe Float
   incline <- readMaybe inclineS :: Maybe Float
   duration <- parseDuration durationS
-  date <- parseDate dateS
+  date <- parseDateYYYYMMDDhyph dateS
   id <- readMaybe idS :: Maybe Int
   Just (Run distance duration date incline commentS id userId)
 
@@ -408,17 +466,32 @@ parseDuration :: String -> Maybe Int
 parseDuration input = do
   parts <- Just (Text.splitOn (Text.pack ":") (Text.pack input))
   case parts of
-    [minS,secS] -> do
-      min <- readMaybe (Text.unpack minS) :: Maybe Int
-      sec <- readMaybe (Text.unpack secS) :: Maybe Int
-      Just (min * 60 + sec)
+    [minS,secS] -> parseMinSec minS secS
+    [_, minS,secS] -> parseMinSec minS secS
     _ -> Nothing
 
-parseDate :: String -> Maybe Day
-parseDate input = do
+parseMinSec :: Text.Text -> Text.Text -> Maybe Int
+parseMinSec minS secS = do
+  min <- readMaybe (Text.unpack minS) :: Maybe Int
+  sec <- readMaybe (Text.unpack secS) :: Maybe Int
+  Just (min * 60 + sec)
+
+parseDateYYYYMMDDhyph :: String -> Maybe Day
+parseDateYYYYMMDDhyph input = do
   parts <- Just (Text.splitOn (Text.pack "-") (Text.pack input))
   case parts of
     [yearS,monthS,dayS] -> do
+      year <- readMaybe (Text.unpack yearS) :: Maybe Integer
+      month <- readMaybe (Text.unpack monthS) :: Maybe Int
+      day <- readMaybe (Text.unpack dayS) :: Maybe Int
+      fromGregorianValid year month day
+    _ -> Nothing
+
+parseDateDDMMYYYYslash :: String -> Maybe Day
+parseDateDDMMYYYYslash input = do
+  parts <- Just (Text.splitOn (Text.pack "/") (Text.pack input))
+  case parts of
+    [monthS,dayS,yearS] -> do
       year <- readMaybe (Text.unpack yearS) :: Maybe Integer
       month <- readMaybe (Text.unpack monthS) :: Maybe Int
       day <- readMaybe (Text.unpack dayS) :: Maybe Int
@@ -690,3 +763,15 @@ mpwChartHtml runs user =
     H.body $ do
       chartHtml Line "Miles (last 7)" "mpw" (show . miles7 . snd) runs
       chartHtml Scatter "Pace (mph)" "mph" (show . mph . fst) runs
+
+importFormHtml :: H.Html
+importFormHtml =
+  H.html $ do
+    H.head $ do
+      H.title "Import data"
+    H.body $ do
+      H.form ! A.method "post"
+             ! A.action "/handleimport"
+             ! A.enctype "multipart/form-data" $ do
+        H.div $ H.input ! A.type_ "file" ! A.name "filedata"
+        H.div $ H.input ! A.type_ "submit"
