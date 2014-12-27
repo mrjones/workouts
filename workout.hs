@@ -56,9 +56,6 @@ main:: IO()
 main = do
   args <- getArgs
   (googleClientId:googleClientSecret:adminKind:adminId:portS:mysqlHost:_)  <- return $ args
---  googleClientSecret <- return $ head $ tail args
---  adminKind <- return $ head $ tail $ tail args
---  adminId <- return $ head $ tail $ tail $ tail args
   putStrLn $ "Using google client id: " ++ googleClientId
   putStrLn $ "Using google client secret: " ++ googleClientSecret
   putStrLn $ "Using admin kind: " ++ adminKind
