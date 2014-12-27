@@ -159,16 +159,17 @@ instance CSV.FromNamedRecord CsvRunRecord where
     record CSV..: "Inc" <*>
     record CSV..: "Comment"
 
+maybeWithDefault :: Maybe a -> a -> a
+maybeWithDefault mval defaultVal = case mval of
+  Just a -> a
+  Nothing -> defaultVal
+
 parseCsvRun :: User -> CsvRunRecord -> Maybe Run
 parseCsvRun owner csv = do
   date <- parseDateDDMMYYYYslash (csvRunDate csv)
   duration <- parseDuration (csvRunDuration csv)
-  inc <- return $ case csvRunIncline csv of
-    Nothing -> 0.0
-    Just i -> i
-  comment <- return $ case csvRunComment csv of
-    Nothing -> ""
-    Just c -> c
+  inc <- return $ maybeWithDefault (csvRunIncline csv) 0.0
+  comment <- return $ maybeWithDefault (csvRunComment csv) ""
   return $ Run (csvRunDist csv) duration date inc comment 0 (userId owner)
 
 handleImportPage :: Connection -> User -> ServerPartT IO Response
@@ -183,9 +184,6 @@ handleImportPage conn user = do
                                  putStrLn $ show run
                                  storeRun conn run (Just Create))
       ok $ toResponse $ simpleMessageHtml "foo"
-
-dump :: Maybe Run -> IO ()
-dump r = putStrLn (show r)
 
 mpwChartPage :: Connection -> User -> ServerPartT IO Response
 mpwChartPage conn user = do
