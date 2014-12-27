@@ -605,8 +605,8 @@ headHtml :: String -> H.Html
 headHtml title =
   H.head $ do
     H.title $ H.toHtml title
-    H.script ! A.type_ "text/javascript" ! A.src "/js/workouts.js" $ ""
     H.script ! A.type_ "text/javascript" ! A.src "https://www.google.com/jsapi" $ ""
+    H.script ! A.type_ "text/javascript" ! A.src "/js/workouts.js" $ ""
     H.link ! A.rel "stylesheet" ! A.type_ "text/css" ! A.href "/css/workouts.css"
 
 executeSqlHtml :: String -> Int64 -> H.Html
@@ -623,15 +623,13 @@ simpleMessageHtml msg =
       H.toHtml msg
 
 headerBarHtml :: User -> H.Html
-headerBarHtml user = H.div $ do
-  H.toHtml $ (userName user) ++ " | "
-  H.a ! A.href "/logout" $ "Logout"
-  H.toHtml $ (" | " :: String)
-  H.a ! A.href "/newrun" $ "New run"
-  H.toHtml $ (" | " :: String)
-  H.a ! A.href "/rundata" $ "All runs"
-  H.toHtml $ (" | " :: String)
-  H.a ! A.href "/chart/mpw" $ "Charts"
+headerBarHtml user =
+  H.div ! A.class_ "header" $ do
+    H.div ! A.class_ "username" $ H.toHtml $ userName user
+    H.a ! A.href "/logout" $ "Logout"
+    H.a ! A.href "/newrun" $ "+ New run"
+    H.a ! A.href "/rundata" $ "All runs"
+    H.a ! A.href "/chart/mpw" $ "Charts"
 
 landingPageHtml :: Maybe User -> H.Html
 landingPageHtml muser =
@@ -651,9 +649,9 @@ dataTableHtml u rs =
     headHtml "Run data"
     H.body $ do
       headerBarHtml u
-      H.table $ do
+      H.table ! A.class_ "datatable" $ do
         dataTableHeader
-        mapM_ dataTableRow rs
+        mapM_ dataTableRow (reverse rs)
       H.div ! A.id "chart_div" $ ""
 
 dataTableHeader :: H.Html
