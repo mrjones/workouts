@@ -407,8 +407,8 @@ annotate2 rs = map buildMeta
                 (computeRest (map date rs))
                 (rankDesc (map scoreRun rs))
                 (rankAsc (map pace rs))
-                (trailingMileage 7 rs)
-                (trailingMileage 56 rs))
+                (trailingMileage 7 7 rs)
+                (trailingMileage 56 7 rs))
 
 buildMeta :: (Integer, Maybe Int, Maybe Int, Float, Float) -> RunMeta
 buildMeta (rest, mscore, mpace, miles7, miles56) =
@@ -421,20 +421,21 @@ buildMeta (rest, mscore, mpace, miles7, miles56) =
   in RunMeta rest score pace miles7 miles56
 
 
-trailingOne :: Integer -> Run -> State [Run] Float
-trailingOne windowSize nextRun =
-  state $ (\rs -> (foldr (\candidate (distAcc, outAcc) ->
-                           if (diffDays (date nextRun) (date candidate) < windowSize)
-                           then ((distAcc + (distance candidate)), candidate:outAcc)
-                           else (distAcc, outAcc)) (0, []) (rs ++ [nextRun])))
+trailingOne :: Integer -> Integer -> Run -> State [Run] Float
+trailingOne windowSize denominatorDays nextRun =
+  let scale = (fromIntegral denominatorDays) / (fromIntegral windowSize)
+  in state $ (\rs -> (foldr (\candidate (distAcc, outAcc) ->
+                              if (diffDays (date nextRun) (date candidate) < windowSize)
+                              then ((distAcc + (scale * (distance candidate))), candidate:outAcc)
+                              else (distAcc, outAcc)) (0.0, []) (rs ++ [nextRun])))
 
-trailingAll :: Integer -> [Run] -> State [Run] [Float]
-trailingAll windowSize runs =
-  mapM (trailingOne windowSize) runs
+trailingAll :: Integer -> Integer -> [Run] -> State [Run] [Float]
+trailingAll windowSize denominatorDays runs =
+  mapM (trailingOne windowSize denominatorDays) runs
 
-trailingMileage :: Integer -> [Run] -> [Float]
-trailingMileage windowSize runs =
-  fst $ runState (trailingAll windowSize runs) []  
+trailingMileage :: Integer -> Integer -> [Run] -> [Float]
+trailingMileage windowSize denominatorDays runs =
+  fst $ runState (trailingAll windowSize denominatorDays runs) []  
 
 computeRest :: [Day] -> [Integer]
 computeRest ds =
