@@ -724,8 +724,9 @@ notLoggedInHtml :: String -> H.Html
 notLoggedInHtml googleUrl =
   H.html $ do
     headHtml "Please log in."
-    H.body $ do
-      H.div $ H.a ! A.href (toValue googleUrl) $ "Login"
+    H.body ! A.class_ "loginpage" $ do
+      H.div ! A.class_ "login" $
+        H.a ! A.href (toValue googleUrl) $ "Login"
 
 jsArray :: String -> String -> String
 jsArray name contents =
