@@ -9,6 +9,8 @@
 
 -- sudo iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80 -j REDIRECT --to-port 8000
 
+module Workouts(WorkoutConf(..), workoutMain) where
+
 import Control.Applicative ((<$>), (<*>))
 import Control.Lens ((^.), (^..))
 import Control.Monad (msum,mzero)
@@ -58,21 +60,6 @@ data WorkoutConf = WorkoutConf { wcGoogleClientId :: String
                                , wcAdminId :: String
                                , wcPort :: Int
                                , wcMysqlHost :: String } deriving (Show)   
-
-main:: IO()
-main = do
-  args <- getArgs
-  (googleClientId:googleClientSecret:adminKind:adminId:portS:mysqlHost:_)  <- return $ args
-  putStrLn $ "Using google client id: " ++ googleClientId
-  putStrLn $ "Using google client secret: " ++ googleClientSecret
-  putStrLn $ "Using admin kind: " ++ adminKind
-  putStrLn $ "Using admin id: " ++ adminId
-  putStrLn $ "Using port: " ++ (show portS)
-  putStrLn $ "Using mysql host: " ++ mysqlHost
-  case (readMaybe portS :: Maybe Int) of
-    Nothing -> fail "Couldn't parse port"
-    Just p -> do
-      workoutMain $ WorkoutConf googleClientId googleClientSecret adminKind adminId p mysqlHost
 
 workoutMain :: WorkoutConf -> IO ()
 workoutMain wc = do
