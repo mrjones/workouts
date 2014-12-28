@@ -194,7 +194,6 @@ handleImportPage conn user = do
     Right (_, v) -> do
       liftIO $ Vector.forM v (\r -> do
                                  run <- return $ (parseCsvRun user r)
-                                 putStrLn $ show run
                                  storeRun conn run (Just Create))
       ok $ toResponse $ simpleMessageHtml "foo"
 
@@ -682,7 +681,7 @@ runDataHtml user run today mutationKind =
     headHtml "New run"
     H.body $ do
       headerBarHtml user
-      H.form ! A.method "post" ! A.action "/handlemutaterun" $ do
+      H.form ! A.class_ "runform" ! A.method "post" ! A.action "/handlemutaterun" $ do
         H.input ! A.type_ "hidden"
                 ! A.name "id"
                 ! A.value (case run of
@@ -714,11 +713,9 @@ runDataFormRow mrun (name, id, formType, defaultValue, extractValue, extraAs) =
              Just run -> A.value $ toValue $ extractValue run
              Nothing -> A.value $ toValue defaultValue
         ] in
-  H.tr $ do
-    H.td $
-      H.label ! A.for (toValue id) $ H.toHtml name
-    H.td $
-      foldr (flip (!)) H.input (defaultAs ++ extraAs)
+  H.div ! A.class_ "formitem" $ do
+    H.div $ H.label ! A.for (toValue id) $ H.toHtml name
+    H.div $ foldr (flip (!)) H.input (defaultAs ++ extraAs)
 
 notLoggedInHtml :: String -> H.Html
 notLoggedInHtml googleUrl =
