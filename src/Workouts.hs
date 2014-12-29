@@ -9,7 +9,7 @@
 
 -- sudo iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80 -j REDIRECT --to-port 8000
 
-module Workouts(WorkoutConf(..), workoutMain, computeRest) where
+module Workouts(WorkoutConf(..), workoutMain, computeRest,rankAsc,parseDuration) where
 
 import Control.Applicative ((<$>), (<*>))
 import Control.Lens ((^.), (^..))
@@ -458,15 +458,16 @@ parseDuration :: String -> Maybe Int
 parseDuration input = do
   parts <- Just (Text.splitOn (Text.pack ":") (Text.pack input))
   case parts of
-    [minS,secS] -> parseMinSec minS secS
-    [_, minS,secS] -> parseMinSec minS secS
+    [minS,secS] -> parseHourMinSec "0" minS secS
+    [hourS,minS,secS] -> parseHourMinSec hourS minS secS
     _ -> Nothing
 
-parseMinSec :: Text.Text -> Text.Text -> Maybe Int
-parseMinSec minS secS = do
+parseHourMinSec :: Text.Text -> Text.Text -> Text.Text -> Maybe Int
+parseHourMinSec hourS minS secS = do
+  hour <- readMaybe (Text.unpack hourS) :: Maybe Int
   min <- readMaybe (Text.unpack minS) :: Maybe Int
   sec <- readMaybe (Text.unpack secS) :: Maybe Int
-  Just (min * 60 + sec)
+  Just (hour * 3600 + min * 60 + sec)
 
 parseDateYYYYMMDDhyph :: String -> Maybe Day
 parseDateYYYYMMDDhyph input = do
