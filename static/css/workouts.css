@@ -89,10 +89,43 @@ body.loginpage {
     background-color: #E0F7FA;
 }
 
+.runform {
+    padding: 1em;
+}
+
+.formitem {
+    margin-bottom: 1em;
+}
+
 @media (max-width: 1000px) {
     .login {
         font-size: 400%;
     }
+
+    .header {
+        font-size: 200%;
+    }
+
+    .header .username {
+        padding-top: 1em;
+        padding-bottom: 1em;
+    }
+
+    .header a {
+        padding-top: 1em;
+        padding-bottom: 1em;
+    }
+
+    .runform {
+        font-size: 300%;
+    }
+
+    .runform input {
+        width: 100%;
+        padding: .5em;
+        font-size: 100%;
+    }
+
 }
 
 @media (min-width: 1000px) {
