@@ -9,7 +9,7 @@
 
 -- sudo iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80 -j REDIRECT --to-port 8000
 
-module Workouts(WorkoutConf(..), workoutMain) where
+module Workouts(WorkoutConf(..), workoutMain, computeRest) where
 
 import Control.Applicative ((<$>), (<*>))
 import Control.Lens ((^.), (^..))
@@ -43,7 +43,6 @@ import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
 import Happstack.Server (dir, nullConf, simpleHTTPWithSocket, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir, mkCookie, addCookie, readCookieValue, CookieLife(Session), lookCookieValue, expireCookie, withHost, port, bindPort, checkRqM, serveFile, asContentType, lookFile)
 import Network.Wreq (post, responseBody, FormParam((:=)))
-import System.Environment (getArgs)
 import System.Locale (defaultTimeLocale)
 import Text.Blaze (toValue)
 import Text.Blaze.Html5 ((!))

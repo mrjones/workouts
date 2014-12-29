@@ -58,4 +58,5 @@ Test-Suite WorkoutsTest
     build-depends: HUnit
     build-depends: test-framework
     build-depends: test-framework-hunit
+    build-depends: time
     build-depends: mrjones-workouts
