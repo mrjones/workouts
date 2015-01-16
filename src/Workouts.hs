@@ -42,6 +42,9 @@ import Database.MySQL.Simple
 import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
 import Happstack.Server (dir, nullConf, simpleHTTPWithSocket, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir, mkCookie, addCookie, readCookieValue, CookieLife(Session), lookCookieValue, expireCookie, withHost, port, bindPort, checkRqM, serveFile, asContentType, lookFile)
+import Happstack.Server.Internal.Types (rqUri)
+import Happstack.Server.Monads (askRq)
+import Happstack.Server.Response (notFound)
 import Network.Wreq (post, responseBody, FormParam((:=)))
 import System.Locale (defaultTimeLocale)
 import Text.Blaze (toValue)
@@ -110,21 +113,32 @@ data Identity = Identity{ displayName :: String
 mb :: Int64
 mb = 1024 * 1024
 
+toResponseStr :: String -> Response
+toResponseStr = toResponse
+
 allPages :: WorkoutConf -> ServerPartT IO Response
 allPages wc =
   withHost (\host -> do
                decodeBody (defaultBodyPolicy "/tmp" (10 * mb) (10 * mb) (10 * mb))
-               conn <- liftIO $ dbConnect (wcMysqlHost wc)
+               req <- askRq
+               liftIO $ putStrLn (rqUri req)
                redirectUrl <- return $ "http://" ++ host ++ "/handlelogin"
                msum [ dir "logout" $ logoutPage
                     , dir "js" $ serveFile (asContentType "text/javascript") "static/js/workouts.js"
                     , dir "css" $ serveFile (asContentType "text/css") "static/css/workouts.css"
-                    , dir "admin" $ dir "mkdb" $ mkDbPage conn
-                    , loggedInPages conn (wcGoogleClientId wc) (wcAdminKind wc) (wcAdminId wc)
-                    , dir "handlelogin" $ handleLoginPage conn (wcGoogleClientId wc) (wcGoogleClientSecret wc) redirectUrl
+                    , dir "favicon.ico" $ serveFile (asContentType "image/x-icon") "static/favicon.ico"
+                    , databasePages wc redirectUrl
                     , do loginUrl <- return $ googleLoginUrl (wcGoogleClientId wc) redirectUrl ""
                          ok $ toResponse $ notLoggedInHtml loginUrl
                     ])
+
+databasePages :: WorkoutConf -> String -> ServerPartT IO Response
+databasePages wc redirectUrl = do
+  conn <- liftIO $ dbConnect (wcMysqlHost wc)
+  msum [ dir "admin" $ dir "mkdb" $ mkDbPage conn
+       , loggedInPages conn (wcGoogleClientId wc) (wcAdminKind wc) (wcAdminId wc)
+       , dir "handlelogin" $ handleLoginPage conn (wcGoogleClientId wc) (wcGoogleClientSecret wc) redirectUrl
+       ]
 
 loggedInPages :: Connection -> String -> String -> String -> ServerPartT IO Response
 loggedInPages conn googleClientId adminKind adminId = do
@@ -516,7 +530,9 @@ storeRun conn mrun mkind =
 --
 
 dbConnect :: String -> IO Connection
-dbConnect hostname = connect defaultConnectInfo
+dbConnect hostname = do
+  putStrLn "DBCONNECT"
+  connect defaultConnectInfo
     { connectUser = "happstack"
     , connectPassword = "happstack"
     , connectDatabase = "happstack"
