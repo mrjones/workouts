@@ -34,7 +34,7 @@ import qualified Data.Text as Text (splitOn, pack, unpack, Text)
 import qualified Data.Text.Lazy as TL (unpack)
 import qualified Data.Text.Encoding as TextEnc (encodeUtf8, decodeUtf8)
 import Data.Time.Calendar (Day, fromGregorianValid, fromGregorian, diffDays)
-import Data.Time.Clock (getCurrentTime)
+import Data.Time.Clock (diffUTCTime, getCurrentTime)
 import Data.Time.Format (formatTime, FormatTime)
 import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, localDay)
 import qualified Data.Vector as Vector (forM_, forM)
@@ -531,13 +531,16 @@ storeRun conn mrun mkind =
 
 dbConnect :: String -> IO Connection
 dbConnect hostname = do
-  putStrLn "DBCONNECT"
-  connect defaultConnectInfo
+  start <- getCurrentTime
+  conn <- connect defaultConnectInfo
     { connectUser = "happstack"
     , connectPassword = "happstack"
     , connectDatabase = "happstack"
     , connectHost = hostname
     }
+  end <- getCurrentTime
+  putStrLn $ "DBConnect time: " ++ (show (diffUTCTime end start))
+  return conn
 
 instance QueryResults Run where
   convertResults [f_dist,f_dur,f_date,f_incl,f_comm,f_id,f_uid] [v_dist,v_dur,v_date,v_incl,v_comm,v_id,v_uid] =
