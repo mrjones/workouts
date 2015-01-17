@@ -34,7 +34,7 @@ import qualified Data.Text as Text (splitOn, pack, unpack, Text)
 import qualified Data.Text.Lazy as TL (unpack)
 import qualified Data.Text.Encoding as TextEnc (encodeUtf8, decodeUtf8)
 import Data.Time.Calendar (Day, fromGregorianValid, fromGregorian, diffDays)
-import Data.Time.Clock (diffUTCTime, getCurrentTime)
+import Data.Time.Clock (diffUTCTime, getCurrentTime, UTCTime(..), NominalDiffTime(..))
 import Data.Time.Format (formatTime, FormatTime)
 import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, localDay)
 import qualified Data.Vector as Vector (forM_, forM)
@@ -119,6 +119,7 @@ toResponseStr = toResponse
 allPages :: WorkoutConf -> ServerPartT IO Response
 allPages wc =
   withHost (\host -> do
+               requestStart <- liftIO $ getCurrentTime
                decodeBody (defaultBodyPolicy "/tmp" (10 * mb) (10 * mb) (10 * mb))
                req <- askRq
                liftIO $ putStrLn (rqUri req)
@@ -127,31 +128,31 @@ allPages wc =
                     , dir "js" $ serveFile (asContentType "text/javascript") "static/js/workouts.js"
                     , dir "css" $ serveFile (asContentType "text/css") "static/css/workouts.css"
                     , dir "favicon.ico" $ serveFile (asContentType "image/x-icon") "static/favicon.ico"
-                    , databasePages wc redirectUrl
+                    , databasePages wc redirectUrl requestStart
                     , do loginUrl <- return $ googleLoginUrl (wcGoogleClientId wc) redirectUrl ""
                          ok $ toResponse $ notLoggedInHtml loginUrl
                     ])
 
-databasePages :: WorkoutConf -> String -> ServerPartT IO Response
-databasePages wc redirectUrl = do
+databasePages :: WorkoutConf -> String -> UTCTime -> ServerPartT IO Response
+databasePages wc redirectUrl requestStart = do
   conn <- liftIO $ dbConnect (wcMysqlHost wc)
   msum [ dir "admin" $ dir "mkdb" $ mkDbPage conn
-       , loggedInPages conn (wcGoogleClientId wc) (wcAdminKind wc) (wcAdminId wc)
+       , loggedInPages conn (wcGoogleClientId wc) (wcAdminKind wc) (wcAdminId wc) requestStart
        , dir "handlelogin" $ handleLoginPage conn (wcGoogleClientId wc) (wcGoogleClientSecret wc) redirectUrl
        ]
 
-loggedInPages :: Connection -> String -> String -> String -> ServerPartT IO Response
-loggedInPages conn googleClientId adminKind adminId = do
+loggedInPages :: Connection -> String -> String -> String -> UTCTime -> ServerPartT IO Response
+loggedInPages conn googleClientId adminKind adminId requestStart = do
   user <- (readCookieValue "userid") `checkRqM` (userWithId conn)
   msum [ dir "admin" $ dir "refreshdb" $ requireAdmin conn adminKind adminId (refreshDbPage conn)
-       , dir "rundata" $ runDataPage conn user
+       , dir "rundata" $ runDataPage conn user requestStart
        , dir "editrun" $ editRunFormPage conn user
        , dir "newrun" $ newRunFormPage user
        , dir "handlemutaterun" $ handleMutateRunPage conn user
        , dir "chart" $ dir "mpw" $ mpwChartPage conn user
        , dir "import" $ importFormPage
        , dir "handleimport" $ handleImportPage conn user
-       , runDataPage conn user
+       , runDataPage conn user requestStart
        ]
 
 importFormPage :: ServerPartT IO Response
@@ -256,10 +257,11 @@ mkDbPage conn = do
   users <- liftIO $ mkUserTable conn
   ok (toResponse (executeSqlHtml "create table" (runs + users)))
 
-runDataPage :: Connection -> User -> ServerPartT IO Response
-runDataPage conn user = do
+runDataPage :: Connection -> User -> UTCTime-> ServerPartT IO Response
+runDataPage conn user requestStart = do
   runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE user_id = (?)ORDER BY date ASC" [(userId user)]
-  ok (toResponse (dataTableHtml user (annotate runs)))
+  queryDone <- liftIO $ getCurrentTime
+  ok (toResponse (dataTableHtml user (annotate runs) (diffUTCTime queryDone requestStart)))
 
 newRunFormPage :: User -> ServerPartT IO Response
 newRunFormPage user = do
@@ -642,8 +644,8 @@ landingPageHtml muser =
           H.div $ H.a ! A.href "/logout" $ H.html "Logout"
         Nothing -> H.div $ H.html "Error"
 
-dataTableHtml :: User -> [(Run, RunMeta)] -> H.Html
-dataTableHtml u rs =
+dataTableHtml :: User -> [(Run, RunMeta)] -> NominalDiffTime -> H.Html
+dataTableHtml u rs t =
   H.html $ do
     headHtml "Run data"
     H.body $ do
@@ -652,6 +654,7 @@ dataTableHtml u rs =
         dataTableHeader
         mapM_ dataTableRow (reverse rs)
       H.div ! A.id "chart_div" $ ""
+      H.div ! A.id "debug" $ H.toHtml $ ("Server time: " ++ (show t))
 
 dataTableHeader :: H.Html
 dataTableHeader =
