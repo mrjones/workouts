@@ -438,8 +438,11 @@ trailingMileage :: Integer -> Integer -> [Run] -> [Float]
 trailingMileage windowSize denominatorDays runs =
   fst $ runState (trailingAll windowSize denominatorDays runs) []  
 
+restDays :: Day -> Day -> Integer
+restDays d1 d2 = (diffDays d1 d2) - 1
+
 computeRest :: [Day] -> [Integer]
-computeRest ds = zipWith diffDays ds ((head ds):ds)
+computeRest ds = zipWith restDays ds ((head ds):ds)
 
 rankAsc :: Ord a => [a] -> [Maybe Int]
 rankAsc = rank id
