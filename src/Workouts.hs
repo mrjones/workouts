@@ -29,6 +29,7 @@ import qualified Data.Csv as CSV (decodeByName, FromNamedRecord(..), (.:), Parse
 import Data.Int (Int64)
 import qualified Data.HashMap.Strict as HM (HashMap(..), keys, lookup)
 import Data.List (reverse, sort, findIndex, zip5, intersperse, concat)
+import Data.Maybe (fromJust)
 import Data.Monoid (mconcat)
 import qualified Data.Text as Text (splitOn, pack, unpack, Text)
 import qualified Data.Text.Lazy as TL (unpack)
@@ -411,15 +412,9 @@ annotate2 rs = map buildMeta
                 (trailingMileage 7 7 rs)
                 (trailingMileage 56 7 rs))
 
-buildMeta :: (Integer, Maybe Int, Maybe Int, Float, Float) -> RunMeta
-buildMeta (rest, mscore, mpace, miles7, miles56) =
-  let score = case mscore of
-        Just s -> s + 1
-        Nothing -> 0
-      pace = case mpace of
-        Just p -> p + 1
-        Nothing -> 0
-  in RunMeta rest score pace miles7 miles56
+buildMeta :: (Integer, Int, Int, Float, Float) -> RunMeta
+buildMeta (rest, score, pace, miles7, miles56) =
+  RunMeta rest score pace miles7 miles56
 
 
 trailingOne :: Integer -> Integer -> Run -> State [Run] Float
@@ -444,16 +439,16 @@ restDays d1 d2 = max ((diffDays d1 d2) - 1) 0
 computeRest :: [Day] -> [Integer]
 computeRest ds = zipWith restDays ds ((head ds):ds)
 
-rankAsc :: Ord a => [a] -> [Maybe Int]
+rankAsc :: Ord a => [a] -> [Int]
 rankAsc = rank id
 
-rankDesc :: Ord a => [a] -> [Maybe Int]
+rankDesc :: Ord a => [a] -> [Int]
 rankDesc = rank reverse
 
-rank :: Ord a => ([a] -> [a]) -> [a] -> [Maybe Int]
+rank :: Ord a => ([a] -> [a]) -> [a] -> [Int]
 rank order ins =
   let sorted = order (sort ins)
-  in map (\x -> findIndex ((==) x) sorted) ins
+  in fromJust . sequence $ map (\x -> findIndex ((==) x) sorted) ins
 
 -- 1000 * 4 * (distance^1.06)/(time_minutes)
 scoreRun :: Run -> Float

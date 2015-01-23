@@ -29,7 +29,7 @@ testComputeRest =
 
 testRankAsc :: Assertion
 testRankAsc =
-  assertEqual "rankAsc" [Just 3, Just 0, Just 2, Just 1] $
+  assertEqual "rankAsc" [3, 0, 2, 1] $
   W.rankAsc [10, 1, 9, 2]
 
 testParseDuration :: String -> Maybe Int -> Assertion
