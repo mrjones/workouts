@@ -19,10 +19,11 @@ workoutsSuite =
 
 testComputeRest :: Assertion
 testComputeRest =
-  assertEqual "rest" [-1, 0, 0, 9] $
+  assertEqual "rest" [0, 0, 0, 9, 0] $
   W.computeRest [ (fromGregorian 2000 1 1)
                 , (fromGregorian 2000 1 2)
                 , (fromGregorian 2000 1 3)
+                , (fromGregorian 2000 1 13)
                 , (fromGregorian 2000 1 13)
                 ]
 

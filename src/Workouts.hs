@@ -439,7 +439,7 @@ trailingMileage windowSize denominatorDays runs =
   fst $ runState (trailingAll windowSize denominatorDays runs) []  
 
 restDays :: Day -> Day -> Integer
-restDays d1 d2 = (diffDays d1 d2) - 1
+restDays d1 d2 = max ((diffDays d1 d2) - 1) 0
 
 computeRest :: [Day] -> [Integer]
 computeRest ds = zipWith restDays ds ((head ds):ds)
