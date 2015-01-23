@@ -62,7 +62,9 @@ data WorkoutConf = WorkoutConf { wcGoogleClientId :: String
                                , wcAdminKind :: String
                                , wcAdminId :: String
                                , wcPort :: Int
-                               , wcMysqlHost :: String } deriving (Show)   
+                               , wcMysqlHost :: String
+                               , wcStaticDir :: String
+                               } deriving (Show)   
 
 workoutMain :: WorkoutConf -> IO ()
 workoutMain wc = do
@@ -117,6 +119,9 @@ mb = 1024 * 1024
 toResponseStr :: String -> Response
 toResponseStr = toResponse
 
+staticPath :: WorkoutConf -> String -> String
+staticPath c p = (wcStaticDir c) ++ "/" ++ p
+
 allPages :: WorkoutConf -> ServerPartT IO Response
 allPages wc =
   withHost (\host -> do
@@ -126,9 +131,9 @@ allPages wc =
                liftIO $ putStrLn (rqUri req)
                redirectUrl <- return $ "http://" ++ host ++ "/handlelogin"
                msum [ dir "logout" $ logoutPage
-                    , dir "js" $ serveFile (asContentType "text/javascript") "static/js/workouts.js"
-                    , dir "css" $ serveFile (asContentType "text/css") "static/css/workouts.css"
-                    , dir "favicon.ico" $ serveFile (asContentType "image/x-icon") "static/favicon.ico"
+                    , dir "js" $ serveFile (asContentType "text/javascript") (staticPath wc "js/workouts.js")
+                    , dir "css" $ serveFile (asContentType "text/css") (staticPath wc "css/workouts.css")
+                    , dir "favicon.ico" $ serveFile (asContentType "image/x-icon") (staticPath wc "favicon.ico")
                     , databasePages wc redirectUrl requestStart
                     , do loginUrl <- return $ googleLoginUrl (wcGoogleClientId wc) redirectUrl ""
                          ok $ toResponse $ notLoggedInHtml loginUrl
