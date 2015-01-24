@@ -453,7 +453,8 @@ rankDesc = rank reverse
 rank :: Ord a => ([a] -> [a]) -> [a] -> [Int]
 rank order ins =
   let sorted = order (sort ins)
-  in fromJust . sequence $ map (\x -> findIndex ((==) x) sorted) ins
+  in map (+1) $ fromJust . sequence $
+     map (\x -> findIndex ((==) x) sorted) ins
 
 -- 1000 * 4 * (distance^1.06)/(time_minutes)
 scoreRun :: Run -> Float
