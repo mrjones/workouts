@@ -70,6 +70,7 @@ workoutMain :: WorkoutConf -> IO ()
 workoutMain wc = do
   let httpConf = nullConf {  port = wcPort wc }
   socket <- bindPort nullConf { port = wcPort wc }
+  putStrLn $ "Serving on port: " ++ (show (wcPort wc))
   simpleHTTPWithSocket socket httpConf $ allPages wc
 
 
