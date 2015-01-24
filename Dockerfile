@@ -2,6 +2,7 @@ FROM ubuntu:14.04
 MAINTAINER Matt Jones <jonesmr@gmail.com>
 
 RUN apt-get update && apt-get install -y \
+    ca-certificates \
     libffi6 \
     libmysqlclient-dev \
     libpcre3-dev
