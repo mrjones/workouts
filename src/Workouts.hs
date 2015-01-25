@@ -29,7 +29,7 @@ import qualified Data.Csv as CSV (decodeByName, FromNamedRecord(..), (.:), Parse
 import Data.Int (Int64)
 import qualified Data.HashMap.Strict as HM (HashMap(..), keys, lookup)
 import Data.List (reverse, sort, findIndex, zip5, intersperse, concat)
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, fromMaybe)
 import Data.Monoid (mconcat)
 import qualified Data.Text as Text (splitOn, pack, unpack, Text)
 import qualified Data.Text.Lazy as TL (unpack)
@@ -180,17 +180,12 @@ instance CSV.FromNamedRecord CsvRunRecord where
     record CSV..: "Inc" <*>
     record CSV..: "Comment"
 
-maybeWithDefault :: Maybe a -> a -> a
-maybeWithDefault mval defaultVal = case mval of
-  Just a -> a
-  Nothing -> defaultVal
-
 parseCsvRun :: User -> CsvRunRecord -> Maybe Run
 parseCsvRun owner csv = do
   date <- parseDateDDMMYYYYslash (csvRunDate csv)
   duration <- parseDuration (csvRunDuration csv)
-  inc <- return $ maybeWithDefault (csvRunIncline csv) 0.0
-  comment <- return $ maybeWithDefault (csvRunComment csv) ""
+  inc <- return $ fromMaybe 0.0 (csvRunIncline csv)
+  comment <- return $ fromMaybe "" (csvRunComment csv)
   return $ Run (csvRunDist csv) duration date inc comment 0 (userId owner)
 
 handleImportPage :: Connection -> User -> ServerPartT IO Response
