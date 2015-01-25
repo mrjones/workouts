@@ -1,6 +1,7 @@
 import Data.Maybe (fromMaybe)
 import System.Console.GetOpt (ArgDescr(..), ArgOrder(..), getOpt, OptDescr(..), usageInfo)
 import System.Environment (getArgs)
+import System.IO (hSetBuffering, BufferMode(LineBuffering), stdout)
 import Workouts(WorkoutConf(..), workoutMain)
 import Text.Read (readMaybe)
 
@@ -52,6 +53,7 @@ defaultConfig = WorkoutConf "" "" "google" "" 8000 "localhost" "static"
 
 main:: IO()
 main = do
+  hSetBuffering stdout LineBuffering
   putStrLn "-----"
   argv <- getArgs
   flags <- argvToFlags argv
