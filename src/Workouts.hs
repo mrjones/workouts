@@ -265,34 +265,49 @@ msts ms = case ms of
   Just s -> s
   Nothing -> "None"
 
-genericSorter :: Maybe String -> Bool -> (Run, RunMeta) -> (Run, RunMeta) -> Ordering
-genericSorter mKey direction (r1, m1) (r2, m2) =
-  let
-    (rA, mA) = if direction then (r1, m1) else (r2, m2)
-    (rB, mB) = if direction then (r2, m2) else (r1, m1)
-  in case mKey of
-    Just "distance" -> compare (distance rA) (distance rB)
-    Just "time" -> compare (duration rA) (duration rB)
-    Just "incline" -> compare (incline rA) (incline rB)
-    Just "pace" -> compare (pace rA) (pace rB)
-    Just "mph" -> compare (mph rA) (mph rB)
-    Just "rest" -> compare (daysOff mA) (daysOff mB)
-    Just "score" -> compare (scoreRun rA) (scoreRun rB)
-    Just "score_rank" -> compare (scoreRank mA) (scoreRank mB)
-    Just "pace_rank" -> compare (paceRank mA) (paceRank mB)
-    Just "miles7" -> compare (miles7 mA) (miles7 mB)
-    _ -> compare (date rA) (date rB)
+sortKey :: Maybe String -> String
+sortKey mKey = case mKey of
+  Just "distance" -> "distance"
+  Just "time" -> "time"
+  Just "incline" -> "incline"
+  Just "pace" -> "pace"
+  Just "mph" -> "mph"
+  Just "rest" -> "rest"
+  Just "score" -> "score"
+  Just "score_rank" -> "score_rank"
+  Just "pace_rank" -> "pace_rank"
+  Just "miles7" -> "miles7"
+  _ -> "date"
 
-buildSorter :: Maybe String -> ((Run, RunMeta) -> (Run, RunMeta) -> Ordering)
-buildSorter sortName = genericSorter sortName False
+sortReverse :: Maybe String -> Bool
+sortReverse mDir = if mDir == Just "True" then True else False
+
+genericSorter :: String -> Bool -> (Run, RunMeta) -> (Run, RunMeta) -> Ordering
+genericSorter key reverse (r1, m1) (r2, m2) =
+  let
+    (rA, mA) = if not reverse then (r1, m1) else (r2, m2)
+    (rB, mB) = if not reverse then (r2, m2) else (r1, m1)
+  in case key of
+    "distance" -> compare (distance rA) (distance rB)     -- descending
+    "time" -> compare (duration rA) (duration rB)         -- descending
+    "incline" -> compare (incline rA) (incline rB)        -- descending
+    "pace" -> compare (pace rB) (pace rA)                 -- ascending
+    "mph" -> compare (mph rA) (mph rB)                    -- descending
+    "rest" -> compare (daysOff mA) (daysOff mB)           -- descending
+    "score" -> compare (scoreRun rA) (scoreRun rB)        -- descending
+    "score_rank" -> compare (scoreRank mB) (scoreRank mA) -- ascending
+    "pace_rank" -> compare (paceRank mB) (paceRank mA)    -- ascending
+    "miles7" -> compare (miles7 mA) (miles7 mB)           -- descending
+    _ -> compare (date rA) (date rB)                      -- descending
 
 runDataPage :: Connection -> User -> UTCTime -> ServerPartT IO Response
 runDataPage conn user requestStart = do
-  mSort <- optional $ look "sort_by"
-  sorter <- return $ buildSorter mSort
+  mSortBy <- optional $ look "sort_by"
+  mSortReverse <- optional $ look "sort_reverse"
+  sorter <- return $ genericSorter (sortKey mSortBy) (sortReverse mSortReverse)
   runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE user_id = (?) ORDER BY date ASC" [(userId user)]
   queryDone <- liftIO $ getCurrentTime
-  ok (toResponse (dataTableHtml user (sortBy sorter (annotate runs)) (diffUTCTime queryDone requestStart) (msts mSort)))
+  ok (toResponse (dataTableHtml user (sortBy sorter (annotate runs)) (diffUTCTime queryDone requestStart) (sortKey mSortBy) (sortReverse mSortReverse)))
 
 newRunFormPage :: User -> ServerPartT IO Response
 newRunFormPage user = do
@@ -675,17 +690,16 @@ landingPageHtml muser =
           H.div $ H.a ! A.href "/logout" $ H.html "Logout"
         Nothing -> H.div $ H.html "Error"
 
-dataTableHtml :: User -> [(Run, RunMeta)] -> NominalDiffTime -> String -> H.Html
-dataTableHtml u rs t msg =
+dataTableHtml :: User -> [(Run, RunMeta)] -> NominalDiffTime -> String -> Bool -> H.Html
+dataTableHtml u rs t currentSort currentReverse =
   H.html $ do
     headHtml "Run data"
     H.body $ do
       headerBarHtml u
       H.table ! A.class_ "datatable" $ do
-        dataTableHeader
+        dataTableHeader currentSort currentReverse
         mapM_ dataTableRow (reverse rs)
       H.div ! A.id "chart_div" $ ""
-      H.div $ H.toHtml ("Message: " ++ msg)
       H.div ! A.id "debug" $ H.toHtml $ ("Server time: " ++ (show t))
 
 
@@ -717,16 +731,20 @@ cols = [ TableColumn "Date" "date" True (\(r,m) -> H.toHtml $ formatTime default
        , TableColumn "Edit" "" False (\(r,m) -> editCellHtml (runid r))
        ]
 
-dataTableHeaderCell :: TableColumn -> H.Html
-dataTableHeaderCell col =
+shouldReverse :: String -> Bool -> TableColumn -> Bool
+shouldReverse currentSortKey currentReverse col =
+  (currentSortKey == (colSortableKey col)) && (not currentReverse)
+
+dataTableHeaderCell :: String -> Bool -> TableColumn -> H.Html
+dataTableHeaderCell currentSort currentReverse col =
   H.td $ H.b $ case (colSortable col) of
-    True -> H.a ! A.href (toValue ("/rundata?sort_by=" ++ (colSortableKey col))) $ H.toHtml $ colHumanName col
+    True -> H.a ! A.href (toValue ("/rundata?sort_by=" ++ (colSortableKey col) ++ "&sort_reverse=" ++ (show (shouldReverse currentSort currentReverse col)))) $ H.toHtml $ colHumanName col
     False -> H.toHtml $ colHumanName col
 
-dataTableHeader :: H.Html
-dataTableHeader =
+dataTableHeader :: String -> Bool ->H.Html
+dataTableHeader currentSort currentReverse =
   H.thead $ H.tr $ do
-    mconcat $ map dataTableHeaderCell cols
+    mconcat $ map (dataTableHeaderCell currentSort currentReverse) cols
 
 dataTableRow :: (Run, RunMeta) -> H.Html
 dataTableRow (r,meta) = H.tr $ mapM_ (\col -> H.td $ ((colDataFn col) (r,meta))) cols
