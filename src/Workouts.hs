@@ -11,7 +11,7 @@
 
 module Workouts(WorkoutConf(..), workoutMain, computeRest,rankAsc,parseDuration) where
 
-import Control.Applicative ((<$>), (<*>))
+import Control.Applicative ((<$>), (<*>), optional)
 import Control.Lens ((^.), (^..))
 import Control.Monad (msum,mzero)
 import Control.Monad.IO.Class (liftIO)
@@ -28,7 +28,7 @@ import qualified Data.ByteString.Base64 as BS64 (decode, decodeLenient)
 import qualified Data.Csv as CSV (decodeByName, FromNamedRecord(..), (.:), Parser(..), NamedRecord(..), lookup)
 import Data.Int (Int64)
 import qualified Data.HashMap.Strict as HM (HashMap(..), keys, lookup)
-import Data.List (reverse, sort, findIndex, zip5, intersperse, concat)
+import Data.List (reverse, sort, findIndex, zip5, intersperse, concat, sortBy)
 import Data.Maybe (fromJust, fromMaybe)
 import Data.Monoid (mconcat)
 import qualified Data.Text as Text (splitOn, pack, unpack, Text)
@@ -259,11 +259,39 @@ mkDbPage conn = do
   users <- liftIO $ mkUserTable conn
   ok (toResponse (executeSqlHtml "create table" (runs + users)))
 
-runDataPage :: Connection -> User -> UTCTime-> ServerPartT IO Response
+msts :: Maybe String -> String
+msts ms = case ms of
+  Just s -> s
+  Nothing -> "None"
+
+genericSorter :: Maybe String -> Bool -> (Run, RunMeta) -> (Run, RunMeta) -> Ordering
+genericSorter mKey direction (r1, m1) (r2, m2) =
+  let
+    (rA, mA) = if direction then (r1, m1) else (r2, m2)
+    (rB, mB) = if direction then (r2, m2) else (r1, m1)
+  in case mKey of
+    Just "distance" -> compare (distance rA) (distance rB)
+    Just "time" -> compare (duration rA) (duration rB)
+    Just "incline" -> compare (incline rA) (incline rB)
+    Just "pace" -> compare (pace rA) (pace rB)
+    Just "mph" -> compare (mph rA) (mph rB)
+    Just "rest" -> compare (daysOff mA) (daysOff mB)
+    Just "score" -> compare (scoreRun rA) (scoreRun rB)
+    Just "score_rank" -> compare (scoreRank mA) (scoreRank mB)
+    Just "pace_rank" -> compare (paceRank mA) (paceRank mB)
+    Just "miles7" -> compare (miles7 mA) (miles7 mB)
+    _ -> compare (date rA) (date rB)
+
+buildSorter :: Maybe String -> ((Run, RunMeta) -> (Run, RunMeta) -> Ordering)
+buildSorter sortName = genericSorter sortName False
+
+runDataPage :: Connection -> User -> UTCTime -> ServerPartT IO Response
 runDataPage conn user requestStart = do
-  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE user_id = (?)ORDER BY date ASC" [(userId user)]
+  mSort <- optional $ look "sort_by"
+  sorter <- return $ buildSorter mSort
+  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE user_id = (?) ORDER BY date ASC" [(userId user)]
   queryDone <- liftIO $ getCurrentTime
-  ok (toResponse (dataTableHtml user (annotate runs) (diffUTCTime queryDone requestStart)))
+  ok (toResponse (dataTableHtml user (sortBy sorter (annotate runs)) (diffUTCTime queryDone requestStart) (msts mSort)))
 
 newRunFormPage :: User -> ServerPartT IO Response
 newRunFormPage user = do
@@ -279,7 +307,7 @@ editRunFormPage conn user = do
   ok $ toResponse $ runDataHtml user (Just (head runs)) (fromGregorian 2014 1 1) Modify
 
 handleMutateRunPage :: Connection -> User -> ServerPartT IO Response
-handleMutateRunPage conn user= do
+handleMutateRunPage conn user = do
   mutationKindS <- body $ look "button"
   distanceS <- body $ look "distance"
   timeS <- body $ look "time"
@@ -412,6 +440,8 @@ annotate2 rs = map buildMeta
                 (rankAsc (map pace rs))
                 (trailingMileage 7 7 rs)
                 (trailingMileage 56 7 rs))
+
+
 
 buildMeta :: (Integer, Int, Int, Float, Float) -> RunMeta
 buildMeta (rest, score, pace, miles7, miles56) =
@@ -644,8 +674,8 @@ landingPageHtml muser =
           H.div $ H.a ! A.href "/logout" $ H.html "Logout"
         Nothing -> H.div $ H.html "Error"
 
-dataTableHtml :: User -> [(Run, RunMeta)] -> NominalDiffTime -> H.Html
-dataTableHtml u rs t =
+dataTableHtml :: User -> [(Run, RunMeta)] -> NominalDiffTime -> String -> H.Html
+dataTableHtml u rs t msg =
   H.html $ do
     headHtml "Run data"
     H.body $ do
@@ -654,12 +684,17 @@ dataTableHtml u rs t =
         dataTableHeader
         mapM_ dataTableRow (reverse rs)
       H.div ! A.id "chart_div" $ ""
+      H.div $ H.toHtml ("Message: " ++ msg)
       H.div ! A.id "debug" $ H.toHtml $ ("Server time: " ++ (show t))
+
+dataTableHeaderCell :: String -> H.Html
+dataTableHeaderCell c =
+  H.td $ H.b $ H.a ! A.href (toValue ("/rundata?sort_by=" ++ c)) $ H.toHtml $ c
 
 dataTableHeader :: H.Html
 dataTableHeader =
   H.thead $ H.tr $ do
-    mconcat $ map (H.td . H.b)
+    mconcat $ map dataTableHeaderCell
       ["Date", "Day", "Dist", "Time", "Incline", "Pace", "MpH", "Rest", "Score", "Score Rank", "Pace Rank", "Miles7", "Comment", "Edit"]
 
 dataTableRow :: (Run, RunMeta) -> H.Html
