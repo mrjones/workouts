@@ -688,38 +688,48 @@ dataTableHtml u rs t msg =
       H.div $ H.toHtml ("Message: " ++ msg)
       H.div ! A.id "debug" $ H.toHtml $ ("Server time: " ++ (show t))
 
-canonicalizeColumn :: String -> String
-canonicalizeColumn human = map (\c -> if c == ' ' then '_' else toLower c) human
 
-dataTableHeaderCell :: String -> H.Html
-dataTableHeaderCell c =
-  H.td $ H.b $ H.a ! A.href (toValue ("/rundata?sort_by=" ++ (canonicalizeColumn c))) $ H.toHtml $ c
+data TableColumn = TableColumn { colHumanName :: String
+                               , colSortableKey :: String
+                               , colSortable :: Bool
+                               , colDataFn :: ((Run, RunMeta) -> H.Html)
+                               }
+editCellHtml :: Int -> H.Html
+editCellHtml id = do
+  "["
+  H.a ! A.href (toValue ("/editrun?id=" ++ (show id))) $ "Edit"
+  "]"
+ 
+cols :: [TableColumn]
+cols = [ TableColumn "Date" "date" True (\(r,m) -> H.toHtml $ formatTime defaultTimeLocale "%Y-%b-%d" (date r))
+       , TableColumn "Day" "" False(\(r,m) -> H.toHtml $ formatTime defaultTimeLocale "%a" (date r))
+       , TableColumn "Dist" "distance" True (\(r,m) -> H.toHtml $ show $ distance r)
+       , TableColumn "Time" "time" True (\(r,m) -> H.toHtml $ printDuration $ duration r)
+       , TableColumn "Incline" "incline" True (\(r,m) -> H.toHtml $ show $ incline r)
+       , TableColumn "Pace" "pace" True (\(r,m) -> H.toHtml $ printDuration $ round (pace r))
+       , TableColumn "MpH" "mph" True (\(r,m) -> H.toHtml (printf "%.2f" (mph r) :: String))
+       , TableColumn "Rest" "Rest" True (\(r,m) -> H.toHtml $ show $ daysOff m)
+       , TableColumn "Score" "score" True (\(r,m) -> H.toHtml $ show $ round (scoreRun r))
+       , TableColumn "Score Rank" "score_rank" True (\(r,m) -> H.toHtml $ scoreRank m)
+       , TableColumn "Pace Rank" "pace_rank" True (\(r,m) -> H.toHtml $ paceRank m)
+       , TableColumn "Miles7" "miles7" True (\(r,m) -> H.toHtml (printf "%.1f" (miles7 m) :: String))
+       , TableColumn "Comment" "" False (\(r,m) -> H.toHtml $ comment r)
+       , TableColumn "Edit" "" False (\(r,m) -> editCellHtml (runid r))
+       ]
+
+dataTableHeaderCell :: TableColumn -> H.Html
+dataTableHeaderCell col =
+  H.td $ H.b $ case (colSortable col) of
+    True -> H.a ! A.href (toValue ("/rundata?sort_by=" ++ (colSortableKey col))) $ H.toHtml $ colHumanName col
+    False -> H.toHtml $ colHumanName col
 
 dataTableHeader :: H.Html
 dataTableHeader =
   H.thead $ H.tr $ do
-    mconcat $ map dataTableHeaderCell
-      ["Date", "Day", "Dist", "Time", "Incline", "Pace", "MpH", "Rest", "Score", "Score Rank", "Pace Rank", "Miles7", "Comment", "Edit"]
+    mconcat $ map dataTableHeaderCell cols
 
 dataTableRow :: (Run, RunMeta) -> H.Html
-dataTableRow (r,meta) = H.tr $ do
-  H.td $ H.toHtml $ formatTime defaultTimeLocale "%Y-%b-%d" (date r)
-  H.td $ H.toHtml $ formatTime defaultTimeLocale "%a" (date r)
-  H.td $ H.toHtml $ show $ distance r
-  H.td $ H.toHtml $ printDuration $ duration r
-  H.td $ H.toHtml $ show $ incline r
-  H.td $ H.toHtml $ printDuration $ round (pace r)
-  H.td $ H.toHtml (printf "%.2f" (mph r) :: String)
-  H.td $ H.toHtml $ show $ daysOff meta
-  H.td $ H.toHtml $ show $ round (scoreRun r)
-  H.td $ H.toHtml $ show $ scoreRank meta
-  H.td $ H.toHtml $ show $ paceRank meta
-  H.td $ H.toHtml (printf "%.1f" (miles7 meta) :: String)
-  H.td $ H.toHtml $ comment r
-  H.td $ do
-    "["
-    H.a ! A.href (toValue ("/editrun?id=" ++ (show (runid r)))) $ "Edit"
-    "]"
+dataTableRow (r,meta) = H.tr $ mapM_ (\col -> H.td $ ((colDataFn col) (r,meta))) cols
 
 runDataHtml :: User -> Maybe Run -> Day -> MutationKind -> H.Html
 runDataHtml user run today mutationKind =
