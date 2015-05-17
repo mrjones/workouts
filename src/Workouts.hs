@@ -722,7 +722,7 @@ cols = [ TableColumn "Date" "date" True (\(r,m) -> H.toHtml $ formatTime default
        , TableColumn "Incline" "incline" True (\(r,m) -> H.toHtml $ show $ incline r)
        , TableColumn "Pace" "pace" True (\(r,m) -> H.toHtml $ printDuration $ round (pace r))
        , TableColumn "MpH" "mph" True (\(r,m) -> H.toHtml (printf "%.2f" (mph r) :: String))
-       , TableColumn "Rest" "Rest" True (\(r,m) -> H.toHtml $ show $ daysOff m)
+       , TableColumn "Rest" "rest" True (\(r,m) -> H.toHtml $ show $ daysOff m)
        , TableColumn "Score" "score" True (\(r,m) -> H.toHtml $ show $ round (scoreRun r))
        , TableColumn "Score Rank" "score_rank" True (\(r,m) -> H.toHtml $ scoreRank m)
        , TableColumn "Pace Rank" "pace_rank" True (\(r,m) -> H.toHtml $ paceRank m)
@@ -735,9 +735,18 @@ shouldReverse :: String -> Bool -> TableColumn -> Bool
 shouldReverse currentSortKey currentReverse col =
   (currentSortKey == (colSortableKey col)) && (not currentReverse)
 
+dataTableHeaderCssClass :: String -> TableColumn -> H.AttributeValue
+dataTableHeaderCssClass currentSortKey col =
+  toValue $ (if (currentSortKey == (colSortableKey col))
+             then "sorted"
+             else
+               if (colSortable col)
+               then "sortable"
+               else "" :: String)
+
 dataTableHeaderCell :: String -> Bool -> TableColumn -> H.Html
 dataTableHeaderCell currentSort currentReverse col =
-  H.td $ H.b $ case (colSortable col) of
+  H.td ! A.class_ (dataTableHeaderCssClass currentSort col) $ H.b $ case (colSortable col) of
     True -> H.a ! A.href (toValue ("/rundata?sort_by=" ++ (colSortableKey col) ++ "&sort_reverse=" ++ (show (shouldReverse currentSort currentReverse col)))) $ H.toHtml $ colHumanName col
     False -> H.toHtml $ colHumanName col
 

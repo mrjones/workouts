@@ -51,6 +51,26 @@ table.datatable {
     background-color: #80DEEA;
 }
 
+.datatable thead td a {
+    color: black;
+    text-decoration: none;
+    display: block;
+}
+
+.datatable thead td.sortable a,
+.datatable thead td.sorted a {
+    color: #00838F;
+}
+
+.datatable thead td.sorted {
+    background-color: #60BECA;
+}
+
+.datatable thead td.sortable:hover,
+.datatable thead td.sorted:hover {
+    background-color: #00BCD4;
+}
+
 .datatable td:first-child {
     border-left: 0;
     margin-left: 0;
