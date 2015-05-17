@@ -26,6 +26,7 @@ import qualified Data.ByteString.Lazy as BL (readFile)
 import qualified Data.ByteString as BS (unpack)
 import qualified Data.ByteString.Base64 as BS64 (decode, decodeLenient)
 import qualified Data.Csv as CSV (decodeByName, FromNamedRecord(..), (.:), Parser(..), NamedRecord(..), lookup)
+import Data.Char (toLower)
 import Data.Int (Int64)
 import qualified Data.HashMap.Strict as HM (HashMap(..), keys, lookup)
 import Data.List (reverse, sort, findIndex, zip5, intersperse, concat, sortBy)
@@ -687,9 +688,12 @@ dataTableHtml u rs t msg =
       H.div $ H.toHtml ("Message: " ++ msg)
       H.div ! A.id "debug" $ H.toHtml $ ("Server time: " ++ (show t))
 
+canonicalizeColumn :: String -> String
+canonicalizeColumn human = map (\c -> if c == ' ' then '_' else toLower c) human
+
 dataTableHeaderCell :: String -> H.Html
 dataTableHeaderCell c =
-  H.td $ H.b $ H.a ! A.href (toValue ("/rundata?sort_by=" ++ c)) $ H.toHtml $ c
+  H.td $ H.b $ H.a ! A.href (toValue ("/rundata?sort_by=" ++ (canonicalizeColumn c))) $ H.toHtml $ c
 
 dataTableHeader :: H.Html
 dataTableHeader =
