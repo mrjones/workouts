@@ -47,6 +47,7 @@ import Happstack.Server (dir, nullConf, simpleHTTPWithSocket, toResponse, ok, Re
 import Happstack.Server.Internal.Types (rqUri)
 import Happstack.Server.Monads (askRq)
 import Happstack.Server.Response (notFound)
+import Happstack.Server.RqData (checkRq, getDataFn, RqData)
 import Network.Wreq (post, responseBody, FormParam((:=)))
 import System.Locale (defaultTimeLocale)
 import Text.Blaze (toValue)
@@ -201,9 +202,21 @@ handleImportPage conn user = do
                                  storeRun conn run (Just Create))
       ok $ toResponse $ simpleMessageHtml "foo"
 
+parseLookback :: Maybe String -> Int
+parseLookback mStr =
+  case mStr of
+    Nothing -> 36500
+    Just str ->
+      case readMaybe str of
+        Just n -> n
+        Nothing -> 36500
+
 mpwChartPage :: Connection -> User -> ServerPartT IO Response
 mpwChartPage conn user = do
-  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE user_id = (?) ORDER BY date ASC" [(userId user)]
+  mLookbackStr <- optional $ look "lookback_days"
+  lookbackStr <- return $ fromMaybe "36500" mLookbackStr
+  lookback <- return $ fromMaybe 36500 (readMaybe lookbackStr :: Maybe Integer)
+  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE user_id = (?) AND date > (NOW() - INTERVAL (?) DAY) ORDER BY date ASC" ((userId user), lookback)
   annotated <- return $ annotate runs
   ok $ toResponse $ mpwChartHtml annotated user
 
@@ -856,7 +869,7 @@ chartHtml2 chart runs =
   let divname = (chartId chart) ++ "_div"
   in do
     H.h3 $ H.toHtml (chartTitle chart)
-    H.div ! A.id (toValue divname) $ ""
+    H.div ! A.id (toValue divname) ! A.class_ "chart_div" $ ""
     H.script ! A.type_ "text/javascript" $ H.toHtml $
       chartJs2 chart runs
 
@@ -866,9 +879,10 @@ mpwChartHtml runs user =
     headHtml "Charts"
     H.body $ do
       headerBarHtml user
-      chartHtml2 (Chart [ Series "MPW" (show . miles7 . snd) "7"
-                        , Series "MPW (last 8w)" (show . miles56 . snd) "56"] "Miles per week" Line "mpw7") runs
-      chartHtml2 (Chart [Series "Pace (mph)" (show . mph . fst) "pace"] "Pace (mph)" Scatter "mph") runs
+      H.div ! A.class_ "chart_wrapper" $ do
+        chartHtml2 (Chart [ Series "MPW" (show . miles7 . snd) "7"
+                          , Series "MPW (last 8w)" (show . miles56 . snd) "56"] "Miles per week" Line "mpw7") runs
+        chartHtml2 (Chart [Series "Pace (mph)" (show . mph . fst) "pace"] "Pace (mph)" Scatter "mph") runs
 
 importFormHtml :: H.Html
 importFormHtml =

@@ -34,6 +34,18 @@ body {
     color: white;
 }
 
+.chart_wrapper {
+    padding: 1em;
+}
+
+.chart_wrapper h3 {
+    margin: 0;
+}
+
+.chart_div {
+    height: 20em;
+}
+
 table.datatable {
     width: 100%;
     font-size: 80%;
