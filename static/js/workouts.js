@@ -3,7 +3,6 @@ google.load('visualization', '1.0', {'packages':['corechart']});
 function changeLookback() {
     var lookbackBox = document.getElementById("lookback_days");
     var newUrl = window.location.pathname + "?lookback_days=" + lookbackBox.value;
-    alert(newUrl);
     window.location = newUrl;
 }
 
