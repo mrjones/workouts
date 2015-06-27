@@ -218,7 +218,7 @@ mpwChartPage conn user = do
   lookback <- return $ fromMaybe 36500 (readMaybe lookbackStr :: Maybe Integer)
   runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE user_id = (?) AND date > (NOW() - INTERVAL (?) DAY) ORDER BY date ASC" ((userId user), lookback)
   annotated <- return $ annotate runs
-  ok $ toResponse $ mpwChartHtml annotated user
+  ok $ toResponse $ mpwChartHtml annotated lookback user
 
 
 logoutPage :: ServerPartT IO Response
@@ -873,13 +873,16 @@ chartHtml2 chart runs =
     H.script ! A.type_ "text/javascript" $ H.toHtml $
       chartJs2 chart runs
 
-mpwChartHtml :: [(Run, RunMeta)] -> User -> H.Html
-mpwChartHtml runs user =
+mpwChartHtml :: [(Run, RunMeta)] -> Integer -> User -> H.Html
+mpwChartHtml runs currentLookback user =
   H.html $ do
     headHtml "Charts"
     H.body $ do
       headerBarHtml user
       H.div ! A.class_ "chart_wrapper" $ do
+        H.form ! A.onsubmit "changeLookback(); return false;" $ do
+          H.input ! A.value (toValue (show currentLookback)) ! A.id "lookback_days"
+          H.input ! A.type_ "submit" ! A.value "Change lookback"
         chartHtml2 (Chart [ Series "MPW" (show . miles7 . snd) "7"
                           , Series "MPW (last 8w)" (show . miles56 . snd) "56"] "Miles per week" Line "mpw7") runs
         chartHtml2 (Chart [Series "Pace (mph)" (show . mph . fst) "pace"] "Pace (mph)" Scatter "mph") runs
