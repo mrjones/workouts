@@ -886,6 +886,7 @@ mpwChartHtml runs currentLookback user =
         chartHtml2 (Chart [ Series "MPW" (show . miles7 . snd) "7"
                           , Series "MPW (last 8w)" (show . miles56 . snd) "56"] "Miles per week" Line "mpw7") runs
         chartHtml2 (Chart [Series "Pace (mph)" (show . mph . fst) "pace"] "Pace (mph)" Scatter "mph") runs
+        chartHtml2 (Chart [Series "Score" (show . scoreRun . fst) "score"] "Score" Scatter "score") runs
 
 importFormHtml :: H.Html
 importFormHtml =
