@@ -838,10 +838,10 @@ data Series = Series { seriesLabel :: String
                      , seriesId :: String
                      }
 
-data Chart = Chart { chartSerieses :: [Series]
-                   , chartTitle :: String
+data Chart = Chart { chartTitle :: String
                    , chartKind :: ChartKind
                    , chartId :: String
+                   , chartSerieses :: [Series]
                    }
 
 genId :: Chart -> Series -> String
@@ -873,6 +873,14 @@ oneChartHtml chart runs =
     H.script ! A.type_ "text/javascript" $ H.toHtml $
       oneChartJs chart runs
 
+charts :: [Chart]
+charts = [ Chart "Miles per week" Line "mpw_chart" [ Series "MPW" (show . miles7 . snd) "mpw7_series"
+                                                   , Series "MPW (last 8w)" (show . miles56 . snd) "mow56_series"]
+         , Chart "Pace (mph)" Scatter "mph_chart" [ Series "Pace (mph)" (show . mph . fst) "pace_series" ]
+         , Chart "Score" Scatter "score_chart" [ Series "Score" (show . scoreRun . fst) "score_series" ]
+         ]
+
+
 mpwChartHtml :: [(Run, RunMeta)] -> Integer -> User -> H.Html
 mpwChartHtml runs currentLookback user =
   H.html $ do
@@ -883,10 +891,7 @@ mpwChartHtml runs currentLookback user =
         H.form ! A.onsubmit "changeLookback(); return false;" $ do
           H.input ! A.value (toValue (show currentLookback)) ! A.id "lookback_days"
           H.input ! A.type_ "submit" ! A.value "Change lookback"
-        oneChartHtml (Chart [ Series "MPW" (show . miles7 . snd) "mpw7_series"
-                            , Series "MPW (last 8w)" (show . miles56 . snd) "mow56_series"] "Miles per week" Line "mpw_chart") runs
-        oneChartHtml (Chart [Series "Pace (mph)" (show . mph . fst) "pace_series"] "Pace (mph)" Scatter "mph_chart") runs
-        oneChartHtml (Chart [Series "Score" (show . scoreRun . fst) "score_series"] "Score" Scatter "score_chart") runs
+        mapM_ (\c -> oneChartHtml c runs) charts
 
 importFormHtml :: H.Html
 importFormHtml =
