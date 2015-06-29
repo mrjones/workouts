@@ -851,8 +851,8 @@ seriesJs :: Chart -> [(Run, RunMeta)] -> Series -> String
 seriesJs chart runs series =
   jsArray (genId chart series) $ concat . intersperse "," $ map (seriesDataFn series) runs
 
-chartJs2 :: Chart -> [(Run, RunMeta)] -> String
-chartJs2 chart runs = concat
+oneChartJs :: Chart -> [(Run, RunMeta)] -> String
+oneChartJs chart runs = concat
   ((++)
    (map (seriesJs chart  runs) (chartSerieses chart))
    [ jsArray ((chartId chart) ++  "_dates") $ concat . intersperse "," $ map (jsDate . date . fst) runs
@@ -864,14 +864,14 @@ chartJs2 chart runs = concat
      (concat (intersperse "," (map (show . seriesLabel) (chartSerieses chart))))
    ])
 
-chartHtml2 :: Chart -> [(Run, RunMeta)] -> H.Html
-chartHtml2 chart runs =
+oneChartHtml :: Chart -> [(Run, RunMeta)] -> H.Html
+oneChartHtml chart runs =
   let divname = (chartId chart) ++ "_div"
   in do
     H.h3 $ H.toHtml (chartTitle chart)
     H.div ! A.id (toValue divname) ! A.class_ "chart_div" $ ""
     H.script ! A.type_ "text/javascript" $ H.toHtml $
-      chartJs2 chart runs
+      oneChartJs chart runs
 
 mpwChartHtml :: [(Run, RunMeta)] -> Integer -> User -> H.Html
 mpwChartHtml runs currentLookback user =
@@ -883,10 +883,10 @@ mpwChartHtml runs currentLookback user =
         H.form ! A.onsubmit "changeLookback(); return false;" $ do
           H.input ! A.value (toValue (show currentLookback)) ! A.id "lookback_days"
           H.input ! A.type_ "submit" ! A.value "Change lookback"
-        chartHtml2 (Chart [ Series "MPW" (show . miles7 . snd) "7"
-                          , Series "MPW (last 8w)" (show . miles56 . snd) "56"] "Miles per week" Line "mpw7") runs
-        chartHtml2 (Chart [Series "Pace (mph)" (show . mph . fst) "pace"] "Pace (mph)" Scatter "mph") runs
-        chartHtml2 (Chart [Series "Score" (show . scoreRun . fst) "score"] "Score" Scatter "score") runs
+        oneChartHtml (Chart [ Series "MPW" (show . miles7 . snd) "mpw7_series"
+                            , Series "MPW (last 8w)" (show . miles56 . snd) "mow56_series"] "Miles per week" Line "mpw_chart") runs
+        oneChartHtml (Chart [Series "Pace (mph)" (show . mph . fst) "pace_series"] "Pace (mph)" Scatter "mph_chart") runs
+        oneChartHtml (Chart [Series "Score" (show . scoreRun . fst) "score_series"] "Score" Scatter "score_chart") runs
 
 importFormHtml :: H.Html
 importFormHtml =
