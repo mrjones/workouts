@@ -875,7 +875,7 @@ oneChartHtml chart runs =
 
 charts :: [Chart]
 charts = [ Chart "Miles per week" Line "mpw_chart" [ Series "MPW" (show . miles7 . snd) "mpw7_series"
-                                                   , Series "MPW (last 8w)" (show . miles56 . snd) "mow56_series"]
+                                                   , Series "MPW (last 8w)" (show . miles56 . snd) "mpw56_series"]
          , Chart "Pace (mph)" Scatter "mph_chart" [ Series "Pace (mph)" (show . mph . fst) "pace_series" ]
          , Chart "Score" Scatter "score_chart" [ Series "Score" (show . scoreRun . fst) "score_series" ]
          ]
