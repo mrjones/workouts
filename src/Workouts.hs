@@ -204,9 +204,7 @@ handleImportPage conn user = do
 
 parseLookback :: Maybe String -> Integer
 parseLookback mStr =
-  fromMaybe 36500 $ do
-    str <- mStr
-    readMaybe str
+  fromMaybe 36500 (mStr >>= readMaybe)
 
 mpwChartPage :: Connection -> User -> ServerPartT IO Response
 mpwChartPage conn user = do
