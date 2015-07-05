@@ -7,6 +7,8 @@ import Test.Framework (testGroup, Test)
 import Test.Framework.Providers.HUnit
 import Test.HUnit hiding (Test)
 
+kDefaultLookback = 36500
+
 workoutsSuite :: Test
 workoutsSuite =
   testGroup "Workouts"
@@ -15,6 +17,9 @@ workoutsSuite =
   , testCase "" $ testParseDuration "20:00" (Just $ 20 * 60)
   , testCase "" $ testParseDuration "1:00:00" (Just $ 60 * 60)
   , testCase "" $ testParseDuration "foo" Nothing
+  , testCase "" $ testParseLookback (Just "xyz") kDefaultLookback
+  , testCase "" $ testParseLookback (Just "12345") 12345
+  , testCase "" $ testParseLookback (Nothing) kDefaultLookback
   ]
 
 testComputeRest :: Assertion
@@ -35,3 +40,7 @@ testRankAsc =
 testParseDuration :: String -> Maybe Int -> Assertion
 testParseDuration input output =
   assertEqual ("parseDuration: " ++ input) output (W.parseDuration input)
+
+testParseLookback :: Maybe String -> Integer -> Assertion
+testParseLookback input output = 
+  assertEqual ("parseLookback: " ++ (show input)) output (W.parseLookback input)

@@ -9,7 +9,7 @@
 
 -- sudo iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80 -j REDIRECT --to-port 8000
 
-module Workouts(WorkoutConf(..), workoutMain, computeRest,rankAsc,parseDuration) where
+module Workouts(WorkoutConf(..), workoutMain, computeRest,rankAsc,parseDuration,parseLookback) where
 
 import Control.Applicative ((<$>), (<*>), optional)
 import Control.Lens ((^.), (^..))
@@ -202,20 +202,16 @@ handleImportPage conn user = do
                                  storeRun conn run (Just Create))
       ok $ toResponse $ simpleMessageHtml "foo"
 
-parseLookback :: Maybe String -> Int
+parseLookback :: Maybe String -> Integer
 parseLookback mStr =
-  case mStr of
-    Nothing -> 36500
-    Just str ->
-      case readMaybe str of
-        Just n -> n
-        Nothing -> 36500
+  fromMaybe 36500 $ do
+    str <- mStr
+    readMaybe str
 
 mpwChartPage :: Connection -> User -> ServerPartT IO Response
 mpwChartPage conn user = do
-  mLookbackStr <- optional $ look "lookback_days"
-  lookbackStr <- return $ fromMaybe "36500" mLookbackStr
-  lookback <- return $ fromMaybe 36500 (readMaybe lookbackStr :: Maybe Integer)
+  lookbackP <- optional $ look "lookback_days"
+  lookback <- return $ parseLookback lookbackP
   runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE user_id = (?) AND date > (NOW() - INTERVAL (?) DAY) ORDER BY date ASC" ((userId user), lookback)
   annotated <- return $ annotate runs
   ok $ toResponse $ mpwChartHtml annotated lookback user
