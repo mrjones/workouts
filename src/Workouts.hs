@@ -154,14 +154,15 @@ loggedInPages :: Connection -> String -> String -> String -> UTCTime -> ServerPa
 loggedInPages conn googleClientId adminKind adminId requestStart = do
   user <- (readCookieValue "userid") `checkRqM` (userWithId conn)
   msum [ dir "admin" $ dir "refreshdb" $ requireAdmin conn adminKind adminId (refreshDbPage conn)
-       , dir "rundata" $ runDataPage conn user requestStart
+       , dir "rundata" $ runDataPage conn user user requestStart
        , dir "editrun" $ editRunFormPage conn user
        , dir "newrun" $ newRunFormPage user
        , dir "handlemutaterun" $ handleMutateRunPage conn user
        , dir "chart" $ dir "mpw" $ mpwChartPage conn user
        , dir "import" $ importFormPage
        , dir "handleimport" $ handleImportPage conn user
-       , runDataPage conn user requestStart
+       , dir "peek" $ peekPage conn user requestStart
+       , runDataPage conn user user requestStart
        ]
 
 importFormPage :: ServerPartT IO Response
@@ -306,14 +307,28 @@ genericSorter key reverse (r1, m1) (r2, m2) =
     "miles7" -> compare (miles7 mA) (miles7 mB)           -- descending
     _ -> compare (date rA) (date rB)                      -- descending
 
-runDataPage :: Connection -> User -> UTCTime -> ServerPartT IO Response
-runDataPage conn user requestStart = do
+peekUser :: Connection -> User -> Maybe String -> IO User
+peekUser conn fallback mId = do
+  case mId of
+    Nothing -> return fallback
+    Just id -> do
+      mUser <- findUserById conn id
+      return $ fromMaybe fallback mUser
+
+peekPage :: Connection -> User -> UTCTime -> ServerPartT IO Response
+peekPage conn loggedInUser requestStart = do
+  mPeekId <- optional $ look "peek_id"
+  displayUser <- liftIO $ peekUser conn loggedInUser mPeekId
+  runDataPage conn loggedInUser displayUser requestStart
+
+runDataPage :: Connection -> User -> User -> UTCTime -> ServerPartT IO Response
+runDataPage conn loggedInUser displayUser requestStart = do
   mSortBy <- optional $ look "sort_by"
   mSortReverse <- optional $ look "sort_reverse"
   sorter <- return $ genericSorter (sortKey mSortBy) (sortReverse mSortReverse)
-  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE user_id = (?) ORDER BY date ASC" [(userId user)]
+  runs <- liftIO $ query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE user_id = (?) ORDER BY date ASC" [(userId displayUser)]
   queryDone <- liftIO $ getCurrentTime
-  ok (toResponse (dataTableHtml user (sortBy sorter (annotate runs)) (diffUTCTime queryDone requestStart) (sortKey mSortBy) (sortReverse mSortReverse)))
+  ok (toResponse (dataTableHtml loggedInUser displayUser (sortBy sorter (annotate runs)) (diffUTCTime queryDone requestStart) (sortKey mSortBy) (sortReverse mSortReverse)))
 
 newRunFormPage :: User -> ServerPartT IO Response
 newRunFormPage user = do
@@ -568,7 +583,6 @@ mph r = 60 * 60 * (distance r) / (fromIntegral (duration r))
 printDuration :: Int -> String
 printDuration secs = printf "%d:%02d" (div secs 60) (mod secs 60)
 
--- TODO(mrjones): push the maybes up to a higher level
 storeRun :: Connection -> Maybe Run -> Maybe MutationKind -> IO Int64
 storeRun conn mrun mkind = fromMaybe (return 0) $ do
   run <- mrun
@@ -673,14 +687,19 @@ simpleMessageHtml msg =
     H.body $ do
       H.toHtml msg
 
-headerBarHtml :: User -> H.Html
-headerBarHtml user =
-  H.div ! A.class_ "header" $ do
-    H.div ! A.class_ "username" $ H.toHtml $ userName user
-    H.a ! A.href "/logout" $ "Logout"
-    H.a ! A.href "/newrun" $ "+ New run"
-    H.a ! A.href "/rundata" $ "All runs"
-    H.a ! A.href "/chart/mpw" $ "Charts"
+headerBarHtml :: User -> User -> H.Html
+headerBarHtml loggedInUser displayUser =
+  H.div ! A.class_ "header" $
+    -- TODO(mrjones): display special header if loggedIn != display
+    let name =
+          if (userId loggedInUser) == (userId displayUser)
+          then userName loggedInUser
+          else (userName loggedInUser) ++ " (" ++ (userName displayUser) ++ ")"
+      in do H.div ! A.class_ "username" $ H.toHtml name
+            H.a ! A.href "/logout" $ "Logout"
+            H.a ! A.href "/newrun" $ "+ New run"
+            H.a ! A.href "/rundata" $ "All runs"
+            H.a ! A.href "/chart/mpw" $ "Charts"
 
 landingPageHtml :: Maybe User -> H.Html
 landingPageHtml muser =
@@ -694,12 +713,12 @@ landingPageHtml muser =
           H.div $ H.a ! A.href "/logout" $ H.html "Logout"
         Nothing -> H.div $ H.html "Error"
 
-dataTableHtml :: User -> [(Run, RunMeta)] -> NominalDiffTime -> String -> Bool -> H.Html
-dataTableHtml u rs t currentSort currentReverse =
+dataTableHtml :: User -> User -> [(Run, RunMeta)] -> NominalDiffTime -> String -> Bool -> H.Html
+dataTableHtml loggedInUser displayUser rs t currentSort currentReverse =
   H.html $ do
     headHtml "Run data"
     H.body $ do
-      headerBarHtml u
+      headerBarHtml loggedInUser displayUser
       H.table ! A.class_ "datatable" $ do
         dataTableHeader currentSort currentReverse
         mapM_ dataTableRow (reverse rs)
@@ -767,7 +786,7 @@ runDataHtml user run today mutationKind =
   H.html $ do
     headHtml "New run"
     H.body $ do
-      headerBarHtml user
+      headerBarHtml user user
       H.form ! A.class_ "runform" ! A.method "post" ! A.action "/handlemutaterun" $ do
         H.input ! A.type_ "hidden"
                 ! A.name "id"
@@ -877,7 +896,7 @@ mpwChartHtml runs currentLookback user =
   H.html $ do
     headHtml "Charts"
     H.body $ do
-      headerBarHtml user
+      headerBarHtml user user
       H.div ! A.class_ "chart_wrapper" $ do
         H.form ! A.onsubmit "changeLookback(); return false;" $ do
           H.input ! A.value (toValue (show currentLookback)) ! A.id "lookback_days"
