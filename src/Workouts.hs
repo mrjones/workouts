@@ -570,12 +570,10 @@ printDuration secs = printf "%d:%02d" (div secs 60) (mod secs 60)
 
 -- TODO(mrjones): push the maybes up to a higher level
 storeRun :: Connection -> Maybe Run -> Maybe MutationKind -> IO Int64
-storeRun conn mrun mkind =
-  case mrun of
-    Just run -> case mkind of
-      Just kind -> storeRun2 conn run kind
-      Nothing -> return 0
-    Nothing -> return 0
+storeRun conn mrun mkind = fromMaybe (return 0) $ do
+  run <- mrun
+  kind <- mkind
+  return $ storeRun2 conn run kind
 
 --
 -- Database logic
