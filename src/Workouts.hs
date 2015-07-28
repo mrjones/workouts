@@ -308,14 +308,14 @@ genericSorter key reverse (r1, m1) (r2, m2) =
     "miles7" -> compare (miles7 mA) (miles7 mB)           -- descending
     _ -> compare (date rA) (date rB)                      -- descending
 
-peekUser' :: Connection -> User -> Maybe String -> MaybeT IO User
-peekUser' conn fallback mId = do
+maybeFindUserWithId :: Connection -> Maybe String -> IO (Maybe User)
+maybeFindUserWithId conn mId = runMaybeT $ do
   id <- MaybeT $ return mId
   MaybeT $ findUserById conn id
 
 peekUser :: Connection -> User -> Maybe String -> IO User
-peekUser conn fallback mId = do
-  fmap (fromMaybe fallback) (runMaybeT (peekUser' conn fallback mId))
+peekUser conn fallback mId =
+  fmap (fromMaybe fallback) (maybeFindUserWithId conn mId)
 
 peekPage :: Connection -> User -> UTCTime -> ServerPartT IO Response
 peekPage conn loggedInUser requestStart = do
