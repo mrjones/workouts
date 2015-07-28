@@ -16,6 +16,7 @@ import Control.Lens ((^.), (^..))
 import Control.Monad (msum,mzero)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State.Lazy (State, state, get, runState)
+import Control.Monad.Trans.Maybe (MaybeT(..), runMaybeT)
 import qualified Data.Aeson as J ((.:))
 import Data.Aeson hiding (decode)
 import qualified Data.Aeson as JSON (decode, FromJSON(..), Object(..))
@@ -307,13 +308,15 @@ genericSorter key reverse (r1, m1) (r2, m2) =
     "miles7" -> compare (miles7 mA) (miles7 mB)           -- descending
     _ -> compare (date rA) (date rB)                      -- descending
 
+peekUser' :: Connection -> User -> Maybe String -> MaybeT IO User
+peekUser' conn fallback mId = do
+  id <- MaybeT $ return mId
+  MaybeT $ findUserById conn id
+
+
 peekUser :: Connection -> User -> Maybe String -> IO User
 peekUser conn fallback mId = do
-  case mId of
-    Nothing -> return fallback
-    Just id -> do
-      mUser <- findUserById conn id
-      return $ fromMaybe fallback mUser
+  fmap (fromMaybe fallback) (runMaybeT (peekUser' conn fallback mId))
 
 peekPage :: Connection -> User -> UTCTime -> ServerPartT IO Response
 peekPage conn loggedInUser requestStart = do
