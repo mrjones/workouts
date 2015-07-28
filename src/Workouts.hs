@@ -313,7 +313,6 @@ peekUser' conn fallback mId = do
   id <- MaybeT $ return mId
   MaybeT $ findUserById conn id
 
-
 peekUser :: Connection -> User -> Maybe String -> IO User
 peekUser conn fallback mId = do
   fmap (fromMaybe fallback) (runMaybeT (peekUser' conn fallback mId))
@@ -818,9 +817,7 @@ runDataFormRow mrun (name, id, formType, defaultValue, extractValue, extraAs) =
         [ A.type_ (toValue formType)
         , A.id (toValue id)
         , A.name (toValue id)
-        , case mrun of
-             Just run -> A.value $ toValue $ extractValue run
-             Nothing -> A.value $ toValue defaultValue
+        , A.value $ toValue $ fromMaybe defaultValue (fmap extractValue mrun)
         ] in
   H.div ! A.class_ "formitem" $ do
     H.div $ H.label ! A.for (toValue id) $ H.toHtml name
