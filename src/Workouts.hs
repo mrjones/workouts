@@ -113,6 +113,11 @@ data Identity = Identity{ displayName :: String
                         , uniqueId :: String
                         , provider :: IdentityProvider } deriving (Show)
 
+data MonthlyData = MonthlyData { year :: Int
+                               , month :: Int
+                               , miles :: Float
+                               }
+
 --
 -- Routing / handlers
 --
@@ -163,6 +168,7 @@ loggedInPages conn googleClientId adminKind adminId requestStart = do
        , dir "import" $ importFormPage
        , dir "handleimport" $ handleImportPage conn user
        , dir "peek" $ peekPage conn user requestStart
+       , dir "monthly" $ monthlyPage conn user
        , runDataPage conn user user requestStart
        ]
 
@@ -312,6 +318,11 @@ maybeFindUserWithId :: Connection -> Maybe String -> IO (Maybe User)
 maybeFindUserWithId conn mId = runMaybeT $ do
   id <- MaybeT $ return mId
   MaybeT $ findUserById conn id
+
+monthlyPage :: Connection -> User -> ServerPartT IO Response
+monthlyPage conn user = do
+  monthlyData <- liftIO $ query conn "SELECT YEAR(date) AS year, MONTH(date) AS month, SUM(miles) FROM happstack.runs WHERE user_id = (?) GROUP BY year, month ORDER BY year ASC, month ASC" [(userId user)]
+  ok $ toResponse $ monthlyDataHtml monthlyData user
 
 peekUser :: Connection -> User -> Maybe String -> IO User
 peekUser conn fallback mId =
@@ -620,6 +631,10 @@ instance QueryResults User where
   convertResults [f_id, f_disp, f_kind, f_fid] [v_id, v_disp, v_kind, v_fid] =
     User (convert f_id v_id) (convert f_disp v_disp) (convert f_kind v_kind) (convert f_fid v_fid)
 
+instance QueryResults MonthlyData where
+  convertResults [f_year, f_month, f_miles] [v_year, v_month, v_miles] =
+    MonthlyData (convert f_year v_year) (convert f_month v_month) (convert f_miles v_miles)
+
 storeRun2 :: Connection -> Run -> MutationKind -> IO Int64
 storeRun2 conn r kind =
     case kind of
@@ -913,3 +928,23 @@ importFormHtml =
              ! A.enctype "multipart/form-data" $ do
         H.div $ H.input ! A.type_ "file" ! A.name "filedata"
         H.div $ H.input ! A.type_ "submit"
+
+monthlyDataRow :: MonthlyData -> H.Html
+monthlyDataRow md =
+  H.tr $ do
+    H.td $ H.toHtml $ year md
+    H.td $ H.toHtml $ month md
+    H.td $ H.toHtml $ miles md
+
+monthlyDataHtml :: [MonthlyData] -> User -> H.Html
+monthlyDataHtml monthlyDataPoints user =
+  H.html $ do
+    headHtml "Monthly Summary"
+    H.body $ do
+      headerBarHtml user user
+      H.table $ do
+        H.tr $ do
+          H.td $ "Year"
+          H.td $ "Month"
+          H.td $ "Miles"
+        mapM_ monthlyDataRow monthlyDataPoints
