@@ -11,26 +11,30 @@
 
 module Workouts(WorkoutConf(..), workoutMain, computeRest,rankAsc,parseDuration,parseLookback) where
 
+import qualified Network.HTTP.Client (Request, Response)
+
 import Control.Applicative ((<$>), (<*>), optional)
 import Control.Lens ((^.), (^..))
 import Control.Monad (msum,mzero)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State.Lazy (State, state, get, runState)
 import Control.Monad.Trans.Maybe (MaybeT(..), runMaybeT)
-import qualified Data.Aeson as J ((.:))
-import Data.Aeson hiding (decode)
+import qualified Data.Aeson as J ((.:), Value)
+import Data.Aeson hiding (decode, Series)
 import qualified Data.Aeson as JSON (decode, FromJSON(..), Object(..))
 import Data.Aeson.Lens (key, _String, values)
 import qualified Data.ByteString.Char8 as C8 (pack,unpack,ByteString,length,append)
-import qualified Data.ByteString.Lazy.Char8 as C8L (fromStrict)
+import qualified Data.ByteString.Lazy.Char8 as C8L (ByteString, fromStrict, pack, putStrLn, unpack)
 import qualified Data.ByteString.Lazy as BL (readFile)
-import qualified Data.ByteString as BS (unpack)
+import qualified Data.ByteString as BS (pack, unpack)
 import qualified Data.ByteString.Base64 as BS64 (decode, decodeLenient)
-import qualified Data.Csv as CSV (decodeByName, FromNamedRecord(..), (.:), Parser(..), NamedRecord(..), lookup)
+import qualified Data.Csv as CSV (decodeByName, FromNamedRecord(..), (.:), Parser(..), NamedRecord(..))
 import Data.Char (toLower)
 import Data.Int (Int64)
+import qualified Data.HashMap.Lazy (lookup)
 import qualified Data.HashMap.Strict as HM (HashMap(..), keys, lookup)
 import Data.List (reverse, sort, findIndex, zip5, intersperse, concat, sortBy)
+import qualified Data.Map
 import Data.Maybe (fromJust, fromMaybe)
 import Data.Monoid (mconcat)
 import qualified Data.Text as Text (splitOn, pack, unpack, Text)
@@ -38,7 +42,7 @@ import qualified Data.Text.Lazy as TL (unpack)
 import qualified Data.Text.Encoding as TextEnc (encodeUtf8, decodeUtf8)
 import Data.Time.Calendar (Day, fromGregorianValid, fromGregorian, diffDays)
 import Data.Time.Clock (diffUTCTime, getCurrentTime, UTCTime(..), NominalDiffTime(..))
-import Data.Time.Format (formatTime, FormatTime)
+import Data.Time.Format (defaultTimeLocale, formatTime, FormatTime)
 import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, localDay)
 import qualified Data.Vector as Vector (forM_, forM)
 import Database.MySQL.Simple
@@ -49,8 +53,9 @@ import Happstack.Server.Internal.Types (rqUri)
 import Happstack.Server.Monads (askRq)
 import Happstack.Server.Response (notFound)
 import Happstack.Server.RqData (checkRq, getDataFn, RqData)
-import Network.Wreq (post, responseBody, FormParam((:=)))
-import System.Locale (defaultTimeLocale)
+--import Network.Wreq (post, responseBody, FormParam((:=)))
+import Network.HTTP.Simple (getResponseBody, httpJSON, httpLBS, parseRequest, parseRequest_, setRequestBodyURLEncoded, setRequestMethod)
+--import System.Locale (defaultTimeLocale)
 import Text.Blaze (toValue)
 import Text.Blaze.Html5 ((!))
 import qualified Text.Blaze.Html5 as H
@@ -58,7 +63,7 @@ import qualified Text.Blaze.Html5.Attributes as A
 import Data.Text.Lazy.Encoding (encodeUtf8, decodeUtf8)
 import Text.Printf (printf)
 import Text.Read (readMaybe)
-import Web.JWT (decode, claims, header, signature)
+import Web.JWT (decode, claims, header, signature, JWT(..), UnverifiedJWT(..))
 
 data WorkoutConf = WorkoutConf { wcGoogleClientId :: String
                                , wcGoogleClientSecret :: String
@@ -67,7 +72,7 @@ data WorkoutConf = WorkoutConf { wcGoogleClientId :: String
                                , wcPort :: Int
                                , wcMysqlHost :: String
                                , wcStaticDir :: String
-                               } deriving (Show)   
+                               } deriving (Show)
 
 workoutMain :: WorkoutConf -> IO ()
 workoutMain wc = do
@@ -166,7 +171,7 @@ loggedInPages conn googleClientId adminKind adminId requestStart = do
        , dir "handlemutaterun" $ handleMutateRunPage conn user
        , dir "chart" $ dir "mpw" $ mpwChartPage conn user
        , dir "import" $ importFormPage
-       , dir "handleimport" $ handleImportPage conn user
+--       , dir "handleimport" $ handleImportPage conn user
        , dir "peek" $ peekPage conn user requestStart
        , dir "monthly" $ monthlyPage conn user
        , runDataPage conn user user requestStart
@@ -181,34 +186,34 @@ data CsvRunRecord = CsvRunRecord { csvRunDate :: String
                                  , csvRunIncline :: Maybe Float
                                  , csvRunComment :: Maybe String } deriving (Show)
 
-instance CSV.FromNamedRecord CsvRunRecord where
-  parseNamedRecord record =
-    CsvRunRecord <$>
-    record CSV..: "Date" <*>
-    record CSV..: "Distance" <*>
-    record CSV..: "Time" <*>
-    record CSV..: "Inc" <*>
-    record CSV..: "Comment"
-
-parseCsvRun :: User -> CsvRunRecord -> Maybe Run
-parseCsvRun owner csv = do
-  date <- parseDateDDMMYYYYslash (csvRunDate csv)
-  duration <- parseDuration (csvRunDuration csv)
-  inc <- return $ fromMaybe 0.0 (csvRunIncline csv)
-  comment <- return $ fromMaybe "" (csvRunComment csv)
-  return $ Run (csvRunDist csv) duration date inc comment 0 (userId owner)
-
-handleImportPage :: Connection -> User -> ServerPartT IO Response
-handleImportPage conn user = do
-  (fname, _, _) <- lookFile "filedata"
-  csvData <- liftIO $ BL.readFile fname
-  case CSV.decodeByName csvData of
-    Left err -> ok $ toResponse $ simpleMessageHtml ("ERROR: " ++ err)
-    Right (_, v) -> do
-      liftIO $ Vector.forM v (\r -> do
-                                 run <- return $ (parseCsvRun user r)
-                                 storeRun conn run (Just Create))
-      ok $ toResponse $ simpleMessageHtml "foo"
+--instance CSV.FromNamedRecord CsvRunRecord where
+--  parseNamedRecord record =
+--    CsvRunRecord <$>
+--    record CSV..: "Date" <*>
+--    record CSV..: "Distance" <*>
+--    record CSV..: "Time" <*>
+--    record CSV..: "Inc" <*>
+--    record CSV..: "Comment"
+--
+--parseCsvRun :: User -> CsvRunRecord -> Maybe Run
+--parseCsvRun owner csv = do
+--  date <- parseDateDDMMYYYYslash (csvRunDate csv)
+--  duration <- parseDuration (csvRunDuration csv)
+--  inc <- return $ fromMaybe 0.0 (csvRunIncline csv)
+--  comment <- return $ fromMaybe "" (csvRunComment csv)
+--  return $ Run (csvRunDist csv) duration date inc comment 0 (userId owner)
+--
+--handleImportPage :: Connection -> User -> ServerPartT IO Response
+--handleImportPage conn user = do
+--  (fname, _, _) <- lookFile "filedata"
+--  csvData <- liftIO $ BL.readFile fname
+--  case CSV.decodeByName csvData of
+--    Left err -> ok $ toResponse $ simpleMessageHtml ("ERROR: " ++ err)
+--    Right (_, v) -> do
+--      liftIO $ Vector.forM v (\r -> do
+--                                 run <- return $ (parseCsvRun user r)
+--                                 storeRun conn run (Just Create))
+--      ok $ toResponse $ simpleMessageHtml "foo"
 
 parseLookback :: Maybe String -> Integer
 parseLookback mStr = fromMaybe 36500 (mStr >>= readMaybe)
@@ -253,7 +258,7 @@ requireAdmin conn adminKind adminId protectedPage = do
                   (adminId == (foreignUserId u)))
               then protectedPage
               else ok $ toResponse $ simpleMessageHtml "NOT ADMIN"
-                        
+
 landingPage :: Connection -> String -> ServerPartT IO Response
 landingPage conn googleClientId = do
   uid <- readCookieValue "userid"
@@ -425,23 +430,43 @@ jwtDecode inTxt =
   JSON.decode (C8L.fromStrict (BS64.decodeLenient (TextEnc.encodeUtf8 inTxt)))
 
 decodeToString :: Text.Text -> String
-decodeToString inTxt = 
+decodeToString inTxt =
   Text.unpack (TextEnc.decodeUtf8 (BS64.decodeLenient (TextEnc.encodeUtf8 inTxt)))
-  
+
+getGoogleJWTToken  :: String -> String -> String -> String -> IO (String)
+getGoogleJWTToken clientid secret code redirectUrl =
+  do
+    let request =
+          setRequestMethod "POST"
+          $ setRequestBodyURLEncoded [("code", C8.pack code),
+                                       ("client_id", C8.pack clientid),
+                                       ("client_secret", C8.pack secret),
+                                       ("redirect_uri", C8.pack redirectUrl),
+                                       ("grant_type", "authorization_code")
+                                     ]
+          $ parseRequest_ getGoogleIdUrl
+    response <- httpJSON request
+    value <- return $ (getResponseBody response :: J.Value)
+    parserResult <- return $ ((fromJSON value) :: Result (Object))
+    -- TODO: yuck
+    return $ case parserResult of
+      Success obj ->
+        case (Data.HashMap.Lazy.lookup "id_token" obj) of
+          Just tokenValue ->
+            case (fromJSON tokenValue) :: Result String of
+              Success tokenStr -> tokenStr
+              Error s -> "damn2: " ++ s
+          Nothing -> "damn no access token"
+      Error s -> "damn: " ++ s
+
 getGoogleId :: String -> String -> String -> String -> IO (Maybe Identity)
 getGoogleId clientid secret code redirectUrl = do
-  r <- post getGoogleIdUrl
-       [ "code" := code
-       , "client_id" := clientid
-       , "client_secret" := secret
-       , "redirect_uri" := redirectUrl
-       , "grant_type" := ("authorization_code" :: String)
-       ]
-  encodedToken <- return $ r ^. responseBody .key "id_token" . _String
+  idToken <- getGoogleJWTToken clientid secret code redirectUrl
+  putStrLn idToken
+  encodedToken <- return $ Text.pack idToken
   encodedParts <- return $ Text.splitOn "." encodedToken
   -- TODO(mrjones): verify the signature with the algorithm named in
   -- the header
-  -- jwtHeader <- return $ (jwtDecode (head encodedParts) :: Maybe JWTHeader)
   jwtPayload <- return $ (jwtDecode (head (tail encodedParts)) :: Maybe JWTPayload)
   return $ case jwtPayload of
     Nothing -> Nothing
@@ -512,7 +537,7 @@ trailingAll windowSize denominatorDays runs =
 
 trailingMileage :: Integer -> Integer -> [Run] -> [Float]
 trailingMileage windowSize denominatorDays runs =
-  fst $ runState (trailingAll windowSize denominatorDays runs) []  
+  fst $ runState (trailingAll windowSize denominatorDays runs) []
 
 restDays :: Day -> Day -> Integer
 restDays d1 d2 = max ((diffDays d1 d2) - 1) 0
@@ -753,7 +778,7 @@ editCellHtml id = do
   "["
   H.a ! A.href (toValue ("/editrun?id=" ++ (show id))) $ "Edit"
   "]"
- 
+
 cols :: [TableColumn]
 cols = [ TableColumn "Date" "date" True (\(r,m) -> H.toHtml $ formatTime defaultTimeLocale "%Y-%b-%d" (date r))
        , TableColumn "Day" "" False(\(r,m) -> H.toHtml $ formatTime defaultTimeLocale "%a" (date r))
@@ -828,7 +853,7 @@ runDataHtml user run today mutationKind =
 
 runDataFormRow :: Maybe Run -> (String, String, String, String, (Run -> String), [H.Attribute]) -> H.Html
 runDataFormRow mrun (name, id, formType, defaultValue, extractValue, extraAs) =
-  let defaultAs = 
+  let defaultAs =
         [ A.type_ (toValue formType)
         , A.id (toValue id)
         , A.name (toValue id)
