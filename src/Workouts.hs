@@ -2,7 +2,6 @@
 
 -- sudo apt-get install libmysqlclient-dev
 -- cabal install mysql-simple
--- cabal install happstack
 -- cabal install jwt
 -- cabal install cassava
 
@@ -10,58 +9,42 @@
 
 module Workouts(WorkoutConf(..), workoutMain, computeRest,rankAsc,parseDuration,parseLookback) where
 
-import qualified Network.HTTP.Client (Request, Response)
-
-import Control.Applicative ((<$>), (<*>), optional)
-import Control.Lens ((^.), (^..))
+import Control.Applicative (optional)
 import Control.Monad (msum,mzero)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.State.Lazy (State, state, get, runState)
+import Control.Monad.State.Lazy (State, state, runState)
 import Control.Monad.Trans.Maybe (MaybeT(..), runMaybeT)
-import qualified Data.Aeson as J ((.:), Value)
-import Data.Aeson hiding (decode, Series)
-import qualified Data.Aeson as JSON (eitherDecode, decode, FromJSON(..), Object(..))
+import qualified Data.Aeson as J ((.:))
+import qualified Data.Aeson as JSON (eitherDecode, fromJSON, FromJSON(..), Result(..), Object, Value(..))
 import Data.Aeson.Types (emptyObject)
-import Data.Aeson.Lens (key, _String, values)
-import qualified Data.ByteString.Char8 as C8 (pack,unpack,ByteString,length,append)
-import qualified Data.ByteString.Lazy.Char8 as C8L (ByteString, fromStrict, pack, putStrLn, unpack)
-import qualified Data.ByteString.Lazy as BL (readFile)
-import qualified Data.ByteString as BS (pack, unpack)
-import qualified Data.ByteString.Base64 as BS64 (decode, decodeLenient)
-import qualified Data.Csv as CSV (decodeByName, FromNamedRecord(..), (.:), Parser(..), NamedRecord(..))
-import Data.Char (toLower)
+import qualified Data.ByteString.Char8 as C8 (pack)
+import qualified Data.ByteString.Lazy.Char8 as C8L (fromStrict)
+import qualified Data.ByteString.Base64 as BS64 (decodeLenient)
+--import qualified Data.Csv as CSV (decodeByName, FromNamedRecord(..), (.:), Parser(..), NamedRecord(..))
 import Data.Int (Int64)
 import qualified Data.HashMap.Lazy (lookupDefault)
-import qualified Data.HashMap.Strict as HM (HashMap(..), keys, lookup)
-import Data.List (reverse, sort, findIndex, zip5, intersperse, concat, sortBy)
-import qualified Data.Map
+import Data.List (sort, findIndex, zip5, intersperse, sortBy)
 import Data.Maybe (fromJust, fromMaybe)
-import Data.Monoid (mconcat)
 import qualified Data.Text as Text (splitOn, pack, unpack, Text)
-import qualified Data.Text.Lazy as TL (unpack)
-import qualified Data.Text.Encoding as TextEnc (encodeUtf8, decodeUtf8)
+import qualified Data.Text.Encoding as TextEnc (encodeUtf8)
 import Data.Time.Calendar (Day, fromGregorianValid, fromGregorian, diffDays)
-import Data.Time.Clock (diffUTCTime, getCurrentTime, UTCTime(..), NominalDiffTime(..))
+import Data.Time.Clock (diffUTCTime, getCurrentTime, UTCTime(..), NominalDiffTime)
 import Data.Time.Format (defaultTimeLocale, formatTime, FormatTime)
-import Data.Time.LocalTime (LocalTime, utcToLocalTime, getCurrentTimeZone, localDay)
-import qualified Data.Vector as Vector (forM_, forM)
+import Data.Time.LocalTime (utcToLocalTime, getCurrentTimeZone, localDay)
 import Database.MySQL.Simple
 import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
 import Database.MySQL.Simple.Result (convert)
-import Happstack.Server (dir, nullConf, simpleHTTPWithSocket, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, nullDir, mkCookie, addCookie, readCookieValue, CookieLife(Session), lookCookieValue, expireCookie, withHost, port, bindPort, checkRqM, serveFile, asContentType, lookFile)
+import Happstack.Server (dir, nullConf, simpleHTTPWithSocket, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, mkCookie, addCookie, readCookieValue, CookieLife(Session), expireCookie, withHost, port, bindPort, checkRqM, serveFile, asContentType)
 import Happstack.Server.Internal.Types (rqUri)
 import Happstack.Server.Monads (askRq)
-import Happstack.Server.Response (notFound)
-import Happstack.Server.RqData (checkRq, getDataFn, RqData)
-import Network.HTTP.Simple (getResponseBody, httpJSON, httpLBS, parseRequest, parseRequest_, setRequestBodyURLEncoded, setRequestMethod)
+import qualified Network.HTTP.Client()
+import Network.HTTP.Simple (getResponseBody, httpJSON, parseRequest_, setRequestBodyURLEncoded, setRequestMethod)
 import Text.Blaze (toValue)
 import Text.Blaze.Html5 ((!))
 import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
-import Data.Text.Lazy.Encoding (encodeUtf8, decodeUtf8)
 import Text.Printf (printf)
 import Text.Read (readMaybe)
-import Web.JWT (decode, claims, header, signature, JWT(..), UnverifiedJWT(..))
 
 data WorkoutConf = WorkoutConf { wcGoogleClientId :: String
                                , wcGoogleClientSecret :: String
@@ -396,7 +379,7 @@ getGoogleIdUrl = "https://www.googleapis.com/oauth2/v3/token"
 data JWTHeader = JWTHeader { alg :: String, kid :: String } deriving (Show)
 
 instance JSON.FromJSON JWTHeader where
-  parseJSON (Object o) = JWTHeader <$>
+  parseJSON (JSON.Object o) = JWTHeader <$>
                               o J..: "alg" <*>
                               o J..: "kid"
   parseJSON _ = mzero
@@ -412,7 +395,7 @@ data JWTPayload = JWTPayload { iss :: String
                              , exp :: Int } deriving (Show)
 
 instance JSON.FromJSON JWTPayload where
-  parseJSON (Object o) = JWTPayload <$>
+  parseJSON (JSON.Object o) = JWTPayload <$>
                          o J..: "iss" <*>
                          o J..: "at_hash" <*>
                          o J..: "email_verified" <*>
@@ -423,19 +406,19 @@ instance JSON.FromJSON JWTPayload where
                          o J..: "iat" <*>
                          o J..: "exp"
 
-decodeText :: FromJSON a => Text.Text -> Either String a
+decodeText :: JSON.FromJSON a => Text.Text -> Either String a
 decodeText inTxt =
   JSON.eitherDecode (C8L.fromStrict (BS64.decodeLenient (TextEnc.encodeUtf8 inTxt)))
 
-extractTokenFromResponse :: J.Value -> Either String String
+extractTokenFromResponse :: JSON.Value -> Either String String
 extractTokenFromResponse responseJson =
   let tokenResult = do
-        obj <- (fromJSON responseJson) :: Result Object
+        obj <- (JSON.fromJSON responseJson) :: JSON.Result JSON.Object
         tokenValue <- return $ Data.HashMap.Lazy.lookupDefault emptyObject "id_token" obj
-        fromJSON tokenValue :: Result String
+        JSON.fromJSON tokenValue :: JSON.Result String
   in case tokenResult of
-       Success t -> Right t
-       Error err -> Left err
+       JSON.Success t -> Right t
+       JSON.Error err -> Left err
 
 getGoogleJWTToken  :: String -> String -> String -> String -> IO (Either String String)
 getGoogleJWTToken clientid secret code redirectUrl =
@@ -450,7 +433,7 @@ getGoogleJWTToken clientid secret code redirectUrl =
                                      ]
           $ parseRequest_ getGoogleIdUrl
     response <- httpJSON request
-    return $ extractTokenFromResponse (getResponseBody response :: J.Value)
+    return $ extractTokenFromResponse (getResponseBody response :: JSON.Value)
 
 getGoogleId :: String -> String -> String -> String -> IO (Either String Identity)
 getGoogleId clientid secret code redirectUrl = do
