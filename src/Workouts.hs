@@ -10,13 +10,13 @@
 module Workouts(WorkoutConf(..), workoutMain, computeRest,rankAsc,parseDuration,parseLookback) where
 
 import Control.Applicative (optional)
-import Control.Monad (msum,mzero)
+import Control.Monad (msum)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State.Lazy (State, state, runState)
 import Control.Monad.Trans.Maybe (MaybeT(..), runMaybeT)
 import qualified Data.Aeson as J ((.:))
 import qualified Data.Aeson as JSON (eitherDecode, fromJSON, FromJSON(..), Result(..), Object, Value(..))
-import Data.Aeson.Types (emptyObject)
+import Data.Aeson.Types (emptyObject, typeMismatch)
 import qualified Data.ByteString.Char8 as C8 (pack)
 import qualified Data.ByteString.Lazy.Char8 as C8L (fromStrict)
 import qualified Data.ByteString.Base64 as BS64 (decodeLenient)
@@ -32,7 +32,7 @@ import Data.Time.Clock (diffUTCTime, getCurrentTime, UTCTime(..), NominalDiffTim
 import Data.Time.Format (defaultTimeLocale, formatTime, FormatTime)
 import Data.Time.LocalTime (utcToLocalTime, getCurrentTimeZone, localDay)
 import Database.MySQL.Simple
-import Database.MySQL.Simple.QueryResults (QueryResults, convertResults)
+import Database.MySQL.Simple.QueryResults (QueryResults, convertError, convertResults)
 import Database.MySQL.Simple.Result (convert)
 import Happstack.Server (dir, nullConf, simpleHTTPWithSocket, toResponse, ok, Response, ServerPartT, look, body, decodeBody, defaultBodyPolicy, queryString, seeOther, mkCookie, addCookie, readCookieValue, CookieLife(Session), expireCookie, withHost, port, bindPort, checkRqM, serveFile, asContentType)
 import Happstack.Server.Internal.Types (rqUri)
@@ -67,19 +67,19 @@ workoutMain wc = do
 -- Data types
 --
 
-data RunMeta = RunMeta { daysOff :: Integer
-                       , scoreRank :: Int
-                       , paceRank :: Int
-                       , miles7 :: Float
-                       , miles56 :: Float
+data RunMeta = RunMeta { metaDaysOff :: Integer
+                       , metaScoreRank :: Int
+                       , metaPaceRank :: Int
+                       , metaMiles7 :: Float
+                       , metaMiles56 :: Float
                        }
 
-data Run = Run { distance :: Float
-               , duration :: Int
-               , date :: Day
-               , incline :: Float
-               , comment :: String
-               , runid :: Int
+data Run = Run { runDistance :: Float
+               , runDuration :: Int
+               , runDate :: Day
+               , runIncline :: Float
+               , runComment :: String
+               , runId :: Int
                , runUserId :: Int
                } deriving (Show)
 
@@ -88,20 +88,18 @@ data User = User { userId :: Int,
                    userKind :: String,
                    foreignUserId :: String } deriving (Read, Show)
 
-data GoogleUser = GoogleUser { googleEmail :: String
-                             , googleId :: String } deriving (Show)
-
 data MutationKind = Create | Modify | Delete deriving (Read, Show)
 
 data IdentityProvider = Google deriving (Show)
 
 data Identity = Identity{ displayName :: String
                         , uniqueId :: String
-                        , provider :: IdentityProvider } deriving (Show)
+                        , _unusedIdProvider :: IdentityProvider
+                        } deriving (Show)
 
-data MonthlyData = MonthlyData { year :: Int
-                               , month :: Int
-                               , miles :: Float
+data MonthlyData = MonthlyData { monthlyYear :: Int
+                               , monthlyMonth :: Int
+                               , monthlyMiles :: Float
                                }
 
 --
@@ -110,9 +108,6 @@ data MonthlyData = MonthlyData { year :: Int
 
 mb :: Int64
 mb = 1024 * 1024
-
-toResponseStr :: String -> Response
-toResponseStr = toResponse
 
 staticPath :: WorkoutConf -> String -> String
 staticPath c p = (wcStaticDir c) ++ "/" ++ p
@@ -138,12 +133,12 @@ databasePages :: WorkoutConf -> String -> UTCTime -> ServerPartT IO Response
 databasePages wc redirectUrl requestStart = do
   conn <- liftIO $ dbConnect (wcMysqlHost wc)
   msum [ dir "admin" $ dir "mkdb" $ mkDbPage conn
-       , loggedInPages conn (wcGoogleClientId wc) (wcAdminKind wc) (wcAdminId wc) requestStart
+       , loggedInPages conn (wcAdminKind wc) (wcAdminId wc) requestStart
        , dir "handlelogin" $ handleLoginPage conn (wcGoogleClientId wc) (wcGoogleClientSecret wc) redirectUrl
        ]
 
-loggedInPages :: Connection -> String -> String -> String -> UTCTime -> ServerPartT IO Response
-loggedInPages conn googleClientId adminKind adminId requestStart = do
+loggedInPages :: Connection -> String -> String -> UTCTime -> ServerPartT IO Response
+loggedInPages conn adminKind adminId requestStart = do
   user <- (readCookieValue "userid") `checkRqM` (userWithId conn)
   msum [ dir "admin" $ dir "refreshdb" $ requireAdmin conn adminKind adminId (refreshDbPage conn)
        , dir "rundata" $ runDataPage conn user user requestStart
@@ -161,11 +156,11 @@ loggedInPages conn googleClientId adminKind adminId requestStart = do
 importFormPage :: ServerPartT IO Response
 importFormPage = ok $ toResponse $ importFormHtml
 
-data CsvRunRecord = CsvRunRecord { csvRunDate :: String
-                                 , csvRunDist :: Float
-                                 , csvRunDuration :: String
-                                 , csvRunIncline :: Maybe Float
-                                 , csvRunComment :: Maybe String } deriving (Show)
+--data CsvRunRecord = CsvRunRecord { csvRunDate :: String
+--                                 , csvRunDist :: Float
+--                                 , csvRunDuration :: String
+--                                 , csvRunIncline :: Maybe Float
+--                                 , csvRunComment :: Maybe String } deriving (Show)
 
 --instance CSV.FromNamedRecord CsvRunRecord where
 --  parseNamedRecord record =
@@ -219,8 +214,8 @@ handleLoginPage conn clientid secret redirectUrl = do
   mid <- liftIO $ getGoogleId clientid secret code redirectUrl
   case mid of
     Left err -> ok $ toResponse $ simpleMessageHtml ("Login failed: " ++ err)
-    Right id -> do
-      mu <- liftIO $ findOrInsertGoogleUser conn (displayName id) (uniqueId id)
+    Right userid -> do
+      mu <- liftIO $ findOrInsertGoogleUser conn (displayName userid) (uniqueId userid)
       case mu of
         Nothing -> ok $ toResponse $ simpleMessageHtml "user <-> db failed"
         -- TODO(mrjones): this is insanely insecure
@@ -240,30 +235,18 @@ requireAdmin conn adminKind adminId protectedPage = do
               then protectedPage
               else ok $ toResponse $ simpleMessageHtml "NOT ADMIN"
 
-landingPage :: Connection -> String -> ServerPartT IO Response
-landingPage conn googleClientId = do
-  uid <- readCookieValue "userid"
-  mu <- liftIO $ findUserById conn uid
-  ok $ toResponse $ landingPageHtml mu
-
-
 refreshDbPage :: Connection -> ServerPartT IO Response
 refreshDbPage conn = do
-  drop <- liftIO $ dropTable conn
-  runs <- liftIO $ mkRunTable conn
-  users <- liftIO $ mkUserTable conn
-  ok (toResponse (executeSqlHtml "create table" (drop + runs + users)))
+  dropN <- liftIO $ dropTable conn
+  runsN <- liftIO $ mkRunTable conn
+  usersN <- liftIO $ mkUserTable conn
+  ok (toResponse (executeSqlHtml "create table" (dropN + runsN + usersN)))
 
 mkDbPage :: Connection -> ServerPartT IO Response
 mkDbPage conn = do
   runs <- liftIO $ mkRunTable conn
   users <- liftIO $ mkUserTable conn
   ok (toResponse (executeSqlHtml "create table" (runs + users)))
-
-msts :: Maybe String -> String
-msts ms = case ms of
-  Just s -> s
-  Nothing -> "None"
 
 sortKey :: Maybe String -> String
 sortKey mKey = case mKey of
@@ -283,27 +266,27 @@ sortReverse :: Maybe String -> Bool
 sortReverse mDir = if mDir == Just "True" then True else False
 
 genericSorter :: String -> Bool -> (Run, RunMeta) -> (Run, RunMeta) -> Ordering
-genericSorter key reverse (r1, m1) (r2, m2) =
+genericSorter key reverseDir (r1, m1) (r2, m2) =
   let
-    (rA, mA) = if not reverse then (r1, m1) else (r2, m2)
-    (rB, mB) = if not reverse then (r2, m2) else (r1, m1)
+    (rA, mA) = if not reverseDir then (r1, m1) else (r2, m2)
+    (rB, mB) = if not reverseDir then (r2, m2) else (r1, m1)
   in case key of
-    "distance" -> compare (distance rA) (distance rB)     -- descending
-    "time" -> compare (duration rA) (duration rB)         -- descending
-    "incline" -> compare (incline rA) (incline rB)        -- descending
-    "pace" -> compare (pace rB) (pace rA)                 -- ascending
-    "mph" -> compare (mph rA) (mph rB)                    -- descending
-    "rest" -> compare (daysOff mA) (daysOff mB)           -- descending
-    "score" -> compare (scoreRun rA) (scoreRun rB)        -- descending
-    "score_rank" -> compare (scoreRank mB) (scoreRank mA) -- ascending
-    "pace_rank" -> compare (paceRank mB) (paceRank mA)    -- ascending
-    "miles7" -> compare (miles7 mA) (miles7 mB)           -- descending
-    _ -> compare (date rA) (date rB)                      -- descending
+    "distance" -> compare (runDistance rA) (runDistance rB)       -- descending
+    "time" -> compare (runDuration rA) (runDuration rB)           -- descending
+    "incline" -> compare (runIncline rA) (runIncline rB)          -- descending
+    "pace" -> compare (pace rB) (pace rA)                         -- ascending
+    "mph" -> compare (mph rA) (mph rB)                            -- descending
+    "rest" -> compare (metaDaysOff mA) (metaDaysOff mB)           -- descending
+    "score" -> compare (scoreRun rA) (scoreRun rB)                -- descending
+    "score_rank" -> compare (metaScoreRank mB) (metaScoreRank mA) -- ascending
+    "pace_rank" -> compare (metaPaceRank mB) (metaPaceRank mA)    -- ascending
+    "miles7" -> compare (metaMiles7 mA) (metaMiles7 mB)           -- descending
+    _ -> compare (runDate rA) (runDate rB)                        -- descending
 
 maybeFindUserWithId :: Connection -> Maybe String -> IO (Maybe User)
 maybeFindUserWithId conn mId = runMaybeT $ do
-  id <- MaybeT $ return mId
-  MaybeT $ findUserById conn id
+  userid <- MaybeT $ return mId
+  MaybeT $ findUserById conn userid
 
 monthlyPage :: Connection -> User -> ServerPartT IO Response
 monthlyPage conn user = do
@@ -334,13 +317,13 @@ newRunFormPage user = do
   tz <- liftIO $ getCurrentTimeZone
   utcNow <- liftIO $ getCurrentTime
   today <- return $ localDay $ utcToLocalTime tz utcNow
-  ok $ toResponse $ runDataHtml user Nothing today Create
+  ok $ toResponse $ runDataHtml user Nothing today
 
 editRunFormPage :: Connection -> User -> ServerPartT IO Response
 editRunFormPage conn user = do
-  id <- queryString $ look "id"
-  runs <- liftIO $ (query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE id = (?)" [id])
-  ok $ toResponse $ runDataHtml user (Just (head runs)) (fromGregorian 2014 1 1) Modify
+  userid <- queryString $ look "id"
+  runs <- liftIO $ (query conn "SELECT miles, duration_sec, date, incline, comment, id, user_id FROM happstack.runs WHERE id = (?)" [userid])
+  ok $ toResponse $ runDataHtml user (Just (head runs)) (fromGregorian 2014 1 1)
 
 handleMutateRunPage :: Connection -> User -> ServerPartT IO Response
 handleMutateRunPage conn user = do
@@ -357,54 +340,34 @@ handleMutateRunPage conn user = do
   case n of
     1 -> seeOther ("/rundata" :: String) (toResponse ("Redirecting to run list" :: String))
     0 -> ok $ toResponse $ simpleMessageHtml "error"
-
+    rows -> ok $ toResponse $ simpleMessageHtml ("Expected to update 1 row, but got: " ++ (show rows))
 --
 -- Google login flow
 --
 
 userWithId :: Connection -> String -> ServerPartT IO (Either String User)
-userWithId conn id = do
-  maybeuser <- liftIO $ findUserById conn id
+userWithId conn userid = do
+  maybeuser <- liftIO $ findUserById conn userid
   return $ case maybeuser of
-    Nothing -> Left ("No user with id: " ++ id)
+    Nothing -> Left ("No user with id: " ++ userid)
     Just user -> Right user
 
 googleLoginUrl :: String -> String -> String -> String
-googleLoginUrl clientid redirect state =
-  printf "https://accounts.google.com/o/oauth2/auth?client_id=%s&response_type=code&scope=openid%%20email&redirect_uri=%s&state=%s" clientid redirect state
+googleLoginUrl clientid redirect stateData =
+  printf "https://accounts.google.com/o/oauth2/auth?client_id=%s&response_type=code&scope=openid%%20email&redirect_uri=%s&state=%s" clientid redirect stateData
 
 getGoogleIdUrl :: String
 getGoogleIdUrl = "https://www.googleapis.com/oauth2/v3/token"
 
-data JWTHeader = JWTHeader { alg :: String, kid :: String } deriving (Show)
-
-instance JSON.FromJSON JWTHeader where
-  parseJSON (JSON.Object o) = JWTHeader <$>
-                              o J..: "alg" <*>
-                              o J..: "kid"
-  parseJSON _ = mzero
-
-data JWTPayload = JWTPayload { iss :: String
-                             , at_has :: String
-                             , email_verified :: Bool
-                             , sub :: String
-                             , azp :: String
-                             , email :: String
-                             , aud :: String
-                             , iat :: Int
-                             , exp :: Int } deriving (Show)
+data JWTPayload = JWTPayload { jwtSub :: String
+                             , jwtEmail :: String
+                             } deriving (Show)
 
 instance JSON.FromJSON JWTPayload where
   parseJSON (JSON.Object o) = JWTPayload <$>
-                         o J..: "iss" <*>
-                         o J..: "at_hash" <*>
-                         o J..: "email_verified" <*>
                          o J..: "sub" <*>
-                         o J..: "azp" <*>
-                         o J..: "email" <*>
-                         o J..: "aud" <*>
-                         o J..: "iat" <*>
-                         o J..: "exp"
+                         o J..: "email"
+  parseJSON v = typeMismatch "jwt" v
 
 decodeText :: JSON.FromJSON a => Text.Text -> Either String a
 decodeText inTxt =
@@ -445,35 +408,35 @@ getGoogleId clientid secret code redirectUrl = do
     -- TODO(mrjones): verify the signature with the algorithm named in
     -- the header
     payload <- (decodeText (head (tail encodedParts)) :: Either String JWTPayload)
-    return (Identity (email payload) (sub payload) Google)
+    return (Identity (jwtEmail payload) (jwtSub payload) Google)
 
 findOrInsertGoogleUser :: Connection -> String -> String -> IO (Maybe User)
 findOrInsertGoogleUser conn email sub = do
   fromDb <- findGoogleUser conn sub
   case fromDb of
-    Nothing -> do n <- insertGoogleUser conn email sub
+    Nothing -> do _ <- insertGoogleUser conn email sub
                   findGoogleUser conn sub
     Just u -> return $ Just u
 
 
 findUserById :: Connection -> String -> IO (Maybe User)
-findUserById conn id = do
-  users <- query conn "SELECT id, display, kind, foreign_id FROM happstack.users WHERE id = (?)" [id]
+findUserById conn userid = do
+  users <- query conn "SELECT id, display, kind, foreign_id FROM happstack.users WHERE id = (?)" [userid]
   case users of
     [] -> return $ Nothing
     (u:_) -> return $ Just u
 
 findGoogleUser :: Connection -> String -> IO (Maybe User)
-findGoogleUser conn sub = do
-  users <- query conn "SELECT id, display, kind, foreign_id FROM happstack.users WHERE kind = 'google' AND foreign_id = (?)" [sub]
+findGoogleUser conn userid = do
+  users <- query conn "SELECT id, display, kind, foreign_id FROM happstack.users WHERE kind = 'google' AND foreign_id = (?)" [userid]
   case users of
     [] -> return $ Nothing
     (u:_) -> return $ Just u
 
 
 insertGoogleUser :: Connection -> String -> String -> IO Int64
-insertGoogleUser conn email sub =
-    execute conn "INSERT INTO happstack.users (display, kind, foreign_id) VALUES (?, 'google', ?)" (email, sub)
+insertGoogleUser conn userdisplay userid =
+    execute conn "INSERT INTO happstack.users (display, kind, foreign_id) VALUES (?, 'google', ?)" (userdisplay, userid)
 
 --
 -- Misc application logic
@@ -485,7 +448,7 @@ annotate rs = zip rs (annotate2 rs)
 annotate2 :: [Run] -> [RunMeta]
 annotate2 rs = map buildMeta
                (zip5
-                (computeRest (map date rs))
+                (computeRest (map runDate rs))
                 (rankDesc (map scoreRun rs))
                 (rankAsc (map pace rs))
                 (trailingMileage 7 7 rs)
@@ -494,16 +457,16 @@ annotate2 rs = map buildMeta
 
 
 buildMeta :: (Integer, Int, Int, Float, Float) -> RunMeta
-buildMeta (rest, score, pace, miles7, miles56) =
-  RunMeta rest score pace miles7 miles56
+buildMeta (rest, score, paceValue, miles7, miles56) =
+  RunMeta rest score paceValue miles7 miles56
 
 
 trailingOne :: Integer -> Integer -> Run -> State [Run] Float
 trailingOne windowSize denominatorDays nextRun =
   let scale = (fromIntegral denominatorDays) / (fromIntegral windowSize)
   in state $ (\rs -> (foldr (\candidate (distAcc, outAcc) ->
-                              if (diffDays (date nextRun) (date candidate) < windowSize)
-                              then ((distAcc + (scale * (distance candidate))), candidate:outAcc)
+                              if (diffDays (runDate nextRun) (runDate candidate) < windowSize)
+                              then ((distAcc + (scale * (runDistance candidate))), candidate:outAcc)
                               else (distAcc, outAcc)) (0.0, []) (rs ++ [nextRun])))
 
 trailingAll :: Integer -> Integer -> [Run] -> State [Run] [Float]
@@ -535,17 +498,17 @@ rank order ins =
 -- 1000 * 4 * (distance^1.06)/(time_minutes)
 scoreRun :: Run -> Float
 scoreRun r =
-  let time_minutes = (fromIntegral (duration r)) / 60
-  in 1000 * 4 * ((distance r) ** (1.06)) / time_minutes
+  let time_minutes = (fromIntegral (runDuration r)) / 60
+  in 1000 * 4 * ((runDistance r) ** (1.06)) / time_minutes
 
 parseRun :: String -> String -> String -> String -> String -> String -> Int -> Maybe Run
-parseRun distanceS durationS dateS inclineS commentS idS userId = do
+parseRun distanceS durationS dateS inclineS commentS idS userid = do
   distance <- readMaybe distanceS :: Maybe Float
   incline <- readMaybe inclineS :: Maybe Float
   duration <- parseDuration durationS
   date <- parseDateYYYYMMDDhyph dateS
-  id <- readMaybe idS :: Maybe Int
-  Just (Run distance duration date incline commentS id userId)
+  runid <- readMaybe idS :: Maybe Int
+  Just (Run distance duration date incline commentS runid userid)
 
 parseDuration :: String -> Maybe Int
 parseDuration input = do
@@ -558,9 +521,9 @@ parseDuration input = do
 parseHourMinSec :: Text.Text -> Text.Text -> Text.Text -> Maybe Int
 parseHourMinSec hourS minS secS = do
   hour <- readMaybe (Text.unpack hourS) :: Maybe Int
-  min <- readMaybe (Text.unpack minS) :: Maybe Int
+  minute <- readMaybe (Text.unpack minS) :: Maybe Int
   sec <- readMaybe (Text.unpack secS) :: Maybe Int
-  Just (hour * 3600 + min * 60 + sec)
+  Just (hour * 3600 + minute * 60 + sec)
 
 parseDateYYYYMMDDhyph :: String -> Maybe Day
 parseDateYYYYMMDDhyph input = do
@@ -573,25 +536,14 @@ parseDateYYYYMMDDhyph input = do
       fromGregorianValid year month day
     _ -> Nothing
 
-parseDateDDMMYYYYslash :: String -> Maybe Day
-parseDateDDMMYYYYslash input = do
-  parts <- Just (Text.splitOn (Text.pack "/") (Text.pack input))
-  case parts of
-    [monthS,dayS,yearS] -> do
-      year <- readMaybe (Text.unpack yearS) :: Maybe Integer
-      month <- readMaybe (Text.unpack monthS) :: Maybe Int
-      day <- readMaybe (Text.unpack dayS) :: Maybe Int
-      fromGregorianValid year month day
-    _ -> Nothing
-
 formatTimeForInput :: FormatTime t => t -> String
 formatTimeForInput time = formatTime defaultTimeLocale "%Y-%m-%d" time
 
 pace :: Run -> Float
-pace r = (fromIntegral (duration r)) / (distance r)
+pace r = (fromIntegral (runDuration r)) / (runDistance r)
 
 mph :: Run -> Float
-mph r = 60 * 60 * (distance r) / (fromIntegral (duration r))
+mph r = 60 * 60 * (runDistance r) / (fromIntegral (runDuration r))
 
 printDuration :: Int -> String
 printDuration secs = printf "%d:%02d" (div secs 60) (mod secs 60)
@@ -622,31 +574,30 @@ dbConnect hostname = do
 instance QueryResults Run where
   convertResults [f_dist,f_dur,f_date,f_incl,f_comm,f_id,f_uid] [v_dist,v_dur,v_date,v_incl,v_comm,v_id,v_uid] =
     Run (convert f_dist v_dist) (convert f_dur v_dur) (convert f_date v_date) (convert f_incl v_incl) (convert f_comm v_comm) (convert f_id v_id) (convert f_uid v_uid)
-
-instance QueryResults GoogleUser where
-  convertResults [f_gemail, f_gid] [v_gemail, v_gid] =
-    GoogleUser (convert f_gemail v_gemail) (convert f_gid v_gid)
+  convertResults fs vs = convertError fs vs 7
 
 instance QueryResults User where
   convertResults [f_id, f_disp, f_kind, f_fid] [v_id, v_disp, v_kind, v_fid] =
     User (convert f_id v_id) (convert f_disp v_disp) (convert f_kind v_kind) (convert f_fid v_fid)
+  convertResults fs vs = convertError fs vs 4
 
 instance QueryResults MonthlyData where
   convertResults [f_year, f_month, f_miles] [v_year, v_month, v_miles] =
     MonthlyData (convert f_year v_year) (convert f_month v_month) (convert f_miles v_miles)
+  convertResults fs vs = convertError fs vs 3
 
 storeRun2 :: Connection -> Run -> MutationKind -> IO Int64
 storeRun2 conn r kind =
     case kind of
       Create -> execute conn
                 "INSERT INTO happstack.runs (date, miles, duration_sec, incline, comment, user_id) VALUES (?, ?, ?, ?, ?, ?)"
-                (date r, distance r, duration r, incline r, comment r, runUserId r)
+                (runDate r, runDistance r, runDuration r, runIncline r, runComment r, runUserId r)
       Modify -> execute conn
                 "UPDATE happstack.runs SET date=?, miles=?, duration_sec=?, incline=?, comment=?, user_id=? WHERE id=?"
-                (date r, distance r, duration r, incline r, comment r, runUserId r, runid r)
+                (runDate r, runDistance r, runDuration r, runIncline r, runComment r, runUserId r, runId r)
       Delete -> execute conn
                 "DELETE FROM happstack.runs WHERE id = (?)"
-                [runid r]
+                [runId r]
 
 --
 -- Database Admin
@@ -654,8 +605,9 @@ storeRun2 conn r kind =
 
 dropTable :: Connection -> IO Int64
 dropTable conn = do
-  execute conn "DROP TABLE happstack.runs" ()
-  execute conn "DROP TABLE happstack.users;" ()
+  r <- execute conn "DROP TABLE happstack.runs" ()
+  u <- execute conn "DROP TABLE happstack.users;" ()
+  return $ r + u
 
 mkUserTable :: Connection -> IO Int64
 mkUserTable conn = do
@@ -719,18 +671,6 @@ headerBarHtml loggedInUser displayUser =
             H.a ! A.href "/chart/mpw" $ "Charts"
             H.a ! A.href "/monthly" $ "Monthly"
 
-landingPageHtml :: Maybe User -> H.Html
-landingPageHtml muser =
-  H.html $ do
-    headHtml "Workout database"
-    H.body $ case muser of
-        Just user -> do
-          H.div $ H.toHtml $ userName user
-          H.div $ H.a ! A.href "/newrun" $ H.html "New run"
-          H.div $ H.a ! A.href "/rundata" $ H.html "View runs"
-          H.div $ H.a ! A.href "/logout" $ H.html "Logout"
-        Nothing -> H.div $ H.html "Error"
-
 dataTableHtml :: User -> User -> [(Run, RunMeta)] -> NominalDiffTime -> String -> Bool -> H.Html
 dataTableHtml loggedInUser displayUser rs t currentSort currentReverse =
   H.html $ do
@@ -750,26 +690,26 @@ data TableColumn = TableColumn { colHumanName :: String
                                , colDataFn :: ((Run, RunMeta) -> H.Html)
                                }
 editCellHtml :: Int -> H.Html
-editCellHtml id = do
+editCellHtml runid = do
   "["
-  H.a ! A.href (toValue ("/editrun?id=" ++ (show id))) $ "Edit"
+  H.a ! A.href (toValue ("/editrun?id=" ++ (show runid))) $ "Edit"
   "]"
 
 cols :: [TableColumn]
-cols = [ TableColumn "Date" "date" True (\(r,m) -> H.toHtml $ formatTime defaultTimeLocale "%Y-%b-%d" (date r))
-       , TableColumn "Day" "" False(\(r,m) -> H.toHtml $ formatTime defaultTimeLocale "%a" (date r))
-       , TableColumn "Dist" "distance" True (\(r,m) -> H.toHtml $ show $ distance r)
-       , TableColumn "Time" "time" True (\(r,m) -> H.toHtml $ printDuration $ duration r)
-       , TableColumn "Incline" "incline" True (\(r,m) -> H.toHtml $ show $ incline r)
-       , TableColumn "Pace" "pace" True (\(r,m) -> H.toHtml $ printDuration $ round (pace r))
-       , TableColumn "MpH" "mph" True (\(r,m) -> H.toHtml (printf "%.2f" (mph r) :: String))
-       , TableColumn "Rest" "rest" True (\(r,m) -> H.toHtml $ show $ daysOff m)
-       , TableColumn "Score" "score" True (\(r,m) -> H.toHtml $ show $ round (scoreRun r))
-       , TableColumn "Score Rank" "score_rank" True (\(r,m) -> H.toHtml $ scoreRank m)
-       , TableColumn "Pace Rank" "pace_rank" True (\(r,m) -> H.toHtml $ paceRank m)
-       , TableColumn "Miles7" "miles7" True (\(r,m) -> H.toHtml (printf "%.1f" (miles7 m) :: String))
-       , TableColumn "Comment" "" False (\(r,m) -> H.toHtml $ comment r)
-       , TableColumn "Edit" "" False (\(r,m) -> editCellHtml (runid r))
+cols = [ TableColumn "Date" "date" True (\(r,_) -> H.toHtml $ formatTime defaultTimeLocale "%Y-%b-%d" (runDate r))
+       , TableColumn "Day" "" False(\(r,_) -> H.toHtml $ formatTime defaultTimeLocale "%a" (runDate r))
+       , TableColumn "Dist" "distance" True (\(r,_) -> H.toHtml $ show $ runDistance r)
+       , TableColumn "Time" "time" True (\(r,_) -> H.toHtml $ printDuration $ runDuration r)
+       , TableColumn "Incline" "incline" True (\(r,_) -> H.toHtml $ show $ runIncline r)
+       , TableColumn "Pace" "pace" True (\(r,_) -> H.toHtml $ printDuration $ round (pace r))
+       , TableColumn "MpH" "mph" True (\(r,_) -> H.toHtml (printf "%.2f" (mph r) :: String))
+       , TableColumn "Rest" "rest" True (\(_,m) -> H.toHtml $ show $ metaDaysOff m)
+       , TableColumn "Score" "score" True (\(r,_) -> H.toHtml $ show $ round (scoreRun r))
+       , TableColumn "Score Rank" "score_rank" True (\(_,m) -> H.toHtml $ metaScoreRank m)
+       , TableColumn "Pace Rank" "pace_rank" True (\(_,m) -> H.toHtml $ metaPaceRank m)
+       , TableColumn "Miles7" "miles7" True (\(_,m) -> H.toHtml (printf "%.1f" (metaMiles7 m) :: String))
+       , TableColumn "Comment" "" False (\(r,_) -> H.toHtml $ runComment r)
+       , TableColumn "Edit" "" False (\(r,_) -> editCellHtml (runId r))
        ]
 
 shouldReverse :: String -> Bool -> TableColumn -> Bool
@@ -799,8 +739,8 @@ dataTableHeader currentSort currentReverse =
 dataTableRow :: (Run, RunMeta) -> H.Html
 dataTableRow (r,meta) = H.tr $ mapM_ (\col -> H.td $ ((colDataFn col) (r,meta))) cols
 
-runDataHtml :: User -> Maybe Run -> Day -> MutationKind -> H.Html
-runDataHtml user run today mutationKind =
+runDataHtml :: User -> Maybe Run -> Day -> H.Html
+runDataHtml user run today =
   H.html $ do
     headHtml "New run"
     H.body $ do
@@ -809,15 +749,15 @@ runDataHtml user run today mutationKind =
         H.input ! A.type_ "hidden"
                 ! A.name "id"
                 ! A.value (case run of
-                              Just r -> toValue (show (runid r))
+                              Just r -> toValue (show (runId r))
                               Nothing -> "0")
         H.table $ do
           mconcat $ map (runDataFormRow run)
-                   [ ("Distance", "distance", "text", "", (show . distance), [])
-                   , ("Time", "time", "text", "", (printDuration . duration), [])
-                   , ("Incline", "incline", "text", "", (show . incline), [])
-                   , ("Date", "date", "date", formatTimeForInput today, (formatTimeForInput . date), [])
-                   , ("Comment", "comment", "text", "", comment, [
+                   [ ("Distance", "distance", "text", "", (show . runDistance), [])
+                   , ("Time", "time", "text", "", (printDuration . runDuration), [])
+                   , ("Incline", "incline", "text", "", (show . runIncline), [])
+                   , ("Date", "date", "date", formatTimeForInput today, (formatTimeForInput . runDate), [])
+                   , ("Comment", "comment", "text", "", runComment, [
                          (A.size (toValue (75 :: Int)))])
                    ]
         case run of
@@ -828,15 +768,15 @@ runDataHtml user run today mutationKind =
 
 
 runDataFormRow :: Maybe Run -> (String, String, String, String, (Run -> String), [H.Attribute]) -> H.Html
-runDataFormRow mrun (name, id, formType, defaultValue, extractValue, extraAs) =
+runDataFormRow mrun (name, userid, formType, defaultValue, extractValue, extraAs) =
   let defaultAs =
         [ A.type_ (toValue formType)
-        , A.id (toValue id)
-        , A.name (toValue id)
+        , A.id (toValue userid)
+        , A.name (toValue userid)
         , A.value $ toValue $ fromMaybe defaultValue (fmap extractValue mrun)
         ] in
   H.div ! A.class_ "formitem" $ do
-    H.div $ H.label ! A.for (toValue id) $ H.toHtml name
+    H.div $ H.label ! A.for (toValue userid) $ H.toHtml name
     H.div $ foldr (flip (!)) H.input (defaultAs ++ extraAs)
 
 notLoggedInHtml :: String -> H.Html
@@ -851,11 +791,9 @@ jsArray :: String -> String -> String
 jsArray name contents =
   printf "var %s = [%s];" name contents
 
-jsStr :: Show a => a -> String
-jsStr d = printf "\"%s\"" (show d)
 
 jsDate :: Day -> String
-jsDate date = formatTime defaultTimeLocale "new Date(%Y, (%m - 1), %e)" date
+jsDate d = formatTime defaultTimeLocale "new Date(%Y, (%m - 1), %e)" d
 
 data ChartKind = Line | Scatter deriving (Show)
 
@@ -881,7 +819,7 @@ oneChartJs :: Chart -> [(Run, RunMeta)] -> String
 oneChartJs chart runs = concat
   ((++)
    (map (seriesJs chart  runs) (chartSerieses chart))
-   [ jsArray ((chartId chart) ++  "_dates") $ concat . intersperse "," $ map (jsDate . date . fst) runs
+   [ jsArray ((chartId chart) ++  "_dates") $ concat . intersperse "," $ map (jsDate . runDate . fst) runs
    , printf "xyChart('%s', '%s_div' , %s_dates, [%s], [%s]);"
      (show (chartKind chart))
      (chartId chart)
@@ -900,8 +838,8 @@ oneChartHtml chart runs =
       oneChartJs chart runs
 
 charts :: [Chart]
-charts = [ Chart "Miles per week" Line "mpw_chart" [ Series "MPW" (show . miles7 . snd) "mpw7_series"
-                                                   , Series "MPW (last 8w)" (show . miles56 . snd) "mpw56_series"]
+charts = [ Chart "Miles per week" Line "mpw_chart" [ Series "MPW" (show . metaMiles7 . snd) "mpw7_series"
+                                                   , Series "MPW (last 8w)" (show . metaMiles56 . snd) "mpw56_series"]
          , Chart "Pace (mph)" Scatter "mph_chart" [ Series "Pace (mph)" (show . mph . fst) "pace_series" ]
          , Chart "Score" Scatter "score_chart" [ Series "Score" (show . scoreRun . fst) "score_series" ]
          ]
@@ -933,9 +871,9 @@ importFormHtml =
 monthlyDataRow :: MonthlyData -> H.Html
 monthlyDataRow md =
   H.tr $ do
-    H.td $ H.toHtml $ year md
-    H.td $ H.toHtml $ month md
-    H.td $ H.toHtml $ miles md
+    H.td $ H.toHtml $ monthlyYear md
+    H.td $ H.toHtml $ monthlyMonth md
+    H.td $ H.toHtml $ monthlyMiles md
 
 monthlyDataHtml :: [MonthlyData] -> User -> H.Html
 monthlyDataHtml monthlyDataPoints user =
