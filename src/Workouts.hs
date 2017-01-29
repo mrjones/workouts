@@ -423,13 +423,9 @@ instance JSON.FromJSON JWTPayload where
                          o J..: "iat" <*>
                          o J..: "exp"
 
-jwtDecode :: FromJSON a => Text.Text -> Maybe a
-jwtDecode inTxt =
+decodeText :: FromJSON a => Text.Text -> Maybe a
+decodeText inTxt =
   JSON.decode (C8L.fromStrict (BS64.decodeLenient (TextEnc.encodeUtf8 inTxt)))
-
-decodeToString :: Text.Text -> String
-decodeToString inTxt =
-  Text.unpack (TextEnc.decodeUtf8 (BS64.decodeLenient (TextEnc.encodeUtf8 inTxt)))
 
 extractTokenFromResponse :: J.Value -> Maybe String
 extractTokenFromResponse responseJson =
@@ -465,7 +461,7 @@ getGoogleId clientid secret code redirectUrl = do
     encodedParts <- return $ Text.splitOn "." encodedToken
     -- TODO(mrjones): verify the signature with the algorithm named in
     -- the header
-    payload <- (jwtDecode (head (tail encodedParts)) :: Maybe JWTPayload)
+    payload <- (decodeText (head (tail encodedParts)) :: Maybe JWTPayload)
     return (Identity (email payload) (sub payload) Google)
 
 findOrInsertGoogleUser :: Connection -> String -> String -> IO (Maybe User)
