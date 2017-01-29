@@ -20,7 +20,7 @@ import Control.Monad.State.Lazy (State, state, get, runState)
 import Control.Monad.Trans.Maybe (MaybeT(..), runMaybeT)
 import qualified Data.Aeson as J ((.:), Value)
 import Data.Aeson hiding (decode, Series)
-import qualified Data.Aeson as JSON (decode, FromJSON(..), Object(..))
+import qualified Data.Aeson as JSON (eitherDecode, decode, FromJSON(..), Object(..))
 import Data.Aeson.Types (emptyObject)
 import Data.Aeson.Lens (key, _String, values)
 import qualified Data.ByteString.Char8 as C8 (pack,unpack,ByteString,length,append)
@@ -235,8 +235,8 @@ handleLoginPage conn clientid secret redirectUrl = do
   code <- look "code"
   mid <- liftIO $ getGoogleId clientid secret code redirectUrl
   case mid of
-    Nothing -> ok $ toResponse $ simpleMessageHtml "Login failed"
-    Just id -> do
+    Left err -> ok $ toResponse $ simpleMessageHtml ("Login failed: " ++ err)
+    Right id -> do
       mu <- liftIO $ findOrInsertGoogleUser conn (displayName id) (uniqueId id)
       case mu of
         Nothing -> ok $ toResponse $ simpleMessageHtml "user <-> db failed"
@@ -423,21 +423,21 @@ instance JSON.FromJSON JWTPayload where
                          o J..: "iat" <*>
                          o J..: "exp"
 
-decodeText :: FromJSON a => Text.Text -> Maybe a
+decodeText :: FromJSON a => Text.Text -> Either String a
 decodeText inTxt =
-  JSON.decode (C8L.fromStrict (BS64.decodeLenient (TextEnc.encodeUtf8 inTxt)))
+  JSON.eitherDecode (C8L.fromStrict (BS64.decodeLenient (TextEnc.encodeUtf8 inTxt)))
 
-extractTokenFromResponse :: J.Value -> Maybe String
+extractTokenFromResponse :: J.Value -> Either String String
 extractTokenFromResponse responseJson =
   let tokenResult = do
         obj <- (fromJSON responseJson) :: Result Object
         tokenValue <- return $ Data.HashMap.Lazy.lookupDefault emptyObject "id_token" obj
         fromJSON tokenValue :: Result String
   in case tokenResult of
-       Success t -> Just t
-       Error _ -> Nothing -- TODO: return/print the error
+       Success t -> Right t
+       Error err -> Left err
 
-getGoogleJWTToken  :: String -> String -> String -> String -> IO (Maybe String)
+getGoogleJWTToken  :: String -> String -> String -> String -> IO (Either String String)
 getGoogleJWTToken clientid secret code redirectUrl =
   do
     let request =
@@ -452,16 +452,16 @@ getGoogleJWTToken clientid secret code redirectUrl =
     response <- httpJSON request
     return $ extractTokenFromResponse (getResponseBody response :: J.Value)
 
-getGoogleId :: String -> String -> String -> String -> IO (Maybe Identity)
+getGoogleId :: String -> String -> String -> String -> IO (Either String Identity)
 getGoogleId clientid secret code redirectUrl = do
   maybeIdToken <- getGoogleJWTToken clientid secret code redirectUrl
   return $ do
-    idToken <- (maybeIdToken :: Maybe String)
+    idToken <- (maybeIdToken :: Either String String)
     encodedToken <- return $ Text.pack idToken
     encodedParts <- return $ Text.splitOn "." encodedToken
     -- TODO(mrjones): verify the signature with the algorithm named in
     -- the header
-    payload <- (decodeText (head (tail encodedParts)) :: Maybe JWTPayload)
+    payload <- (decodeText (head (tail encodedParts)) :: Either String JWTPayload)
     return (Identity (email payload) (sub payload) Google)
 
 findOrInsertGoogleUser :: Connection -> String -> String -> IO (Maybe User)
