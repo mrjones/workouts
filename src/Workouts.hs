@@ -1,12 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- sudo apt-get install libmysqlclient-dev
--- cabal install mysql-simple
--- cabal install jwt
--- cabal install cassava
-
--- sudo iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80 -j REDIRECT --to-port 8000
-
 module Workouts(WorkoutConf(..), workoutMain, computeRest,rankAsc,parseDuration,parseLookback) where
 
 import Control.Applicative (optional)
