@@ -3,7 +3,6 @@
 -- sudo apt-get install libmysqlclient-dev
 -- cabal install mysql-simple
 -- cabal install happstack
--- cabal install wreq
 -- cabal install jwt
 -- cabal install cassava
 
@@ -53,9 +52,7 @@ import Happstack.Server.Internal.Types (rqUri)
 import Happstack.Server.Monads (askRq)
 import Happstack.Server.Response (notFound)
 import Happstack.Server.RqData (checkRq, getDataFn, RqData)
---import Network.Wreq (post, responseBody, FormParam((:=)))
 import Network.HTTP.Simple (getResponseBody, httpJSON, httpLBS, parseRequest, parseRequest_, setRequestBodyURLEncoded, setRequestMethod)
---import System.Locale (defaultTimeLocale)
 import Text.Blaze (toValue)
 import Text.Blaze.Html5 ((!))
 import qualified Text.Blaze.Html5 as H
@@ -326,7 +323,7 @@ maybeFindUserWithId conn mId = runMaybeT $ do
 
 monthlyPage :: Connection -> User -> ServerPartT IO Response
 monthlyPage conn user = do
-  monthlyData <- liftIO $ query conn "SELECT YEAR(date) AS year, MONTH(date) AS month, SUM(miles) FROM happstack.runs WHERE user_id = (?) GROUP BY year, month ORDER BY year ASC, month ASC" [(userId user)]
+  monthlyData <- liftIO $ query conn "SELECT YEAR(date) AS year, MONTH(date) AS month, SUM(miles) FROM happstack.runs WHERE user_id = (?) GROUP BY year, month ORDER BY year ASC, month DESC" [(userId user)]
   ok $ toResponse $ monthlyDataHtml monthlyData user
 
 peekUser :: Connection -> User -> Maybe String -> IO User
@@ -433,31 +430,34 @@ decodeToString :: Text.Text -> String
 decodeToString inTxt =
   Text.unpack (TextEnc.decodeUtf8 (BS64.decodeLenient (TextEnc.encodeUtf8 inTxt)))
 
+extractTokenFromResponse :: J.Value -> String
+extractTokenFromResponse responseJson =
+  -- TODO(mrjones): yuck
+  case (fromJSON responseJson) :: Result Object of
+    Success obj ->
+      case (Data.HashMap.Lazy.lookup "id_token" obj) of
+        Just tokenValue ->
+          case (fromJSON tokenValue) :: Result String of
+            Success tokenStr -> tokenStr
+            Error s -> "damn2: " ++ s
+        Nothing -> "damn no access token"
+    Error s -> "damn: " ++ s
+
+
 getGoogleJWTToken  :: String -> String -> String -> String -> IO (String)
 getGoogleJWTToken clientid secret code redirectUrl =
   do
     let request =
           setRequestMethod "POST"
           $ setRequestBodyURLEncoded [("code", C8.pack code),
-                                       ("client_id", C8.pack clientid),
-                                       ("client_secret", C8.pack secret),
-                                       ("redirect_uri", C8.pack redirectUrl),
-                                       ("grant_type", "authorization_code")
+                                      ("client_id", C8.pack clientid),
+                                      ("client_secret", C8.pack secret),
+                                      ("redirect_uri", C8.pack redirectUrl),
+                                      ("grant_type", "authorization_code")
                                      ]
           $ parseRequest_ getGoogleIdUrl
     response <- httpJSON request
-    value <- return $ (getResponseBody response :: J.Value)
-    parserResult <- return $ ((fromJSON value) :: Result (Object))
-    -- TODO: yuck
-    return $ case parserResult of
-      Success obj ->
-        case (Data.HashMap.Lazy.lookup "id_token" obj) of
-          Just tokenValue ->
-            case (fromJSON tokenValue) :: Result String of
-              Success tokenStr -> tokenStr
-              Error s -> "damn2: " ++ s
-          Nothing -> "damn no access token"
-      Error s -> "damn: " ++ s
+    return $ extractTokenFromResponse (getResponseBody response :: J.Value)
 
 getGoogleId :: String -> String -> String -> String -> IO (Maybe Identity)
 getGoogleId clientid secret code redirectUrl = do
@@ -739,9 +739,10 @@ headerBarHtml loggedInUser displayUser =
           else (userName loggedInUser) ++ " (" ++ (userName displayUser) ++ ")"
       in do H.div ! A.class_ "username" $ H.toHtml name
             H.a ! A.href "/logout" $ "Logout"
-            H.a ! A.href "/newrun" $ "+ New run"
-            H.a ! A.href "/rundata" $ "All runs"
+            H.a ! A.href "/newrun" $ "+ New"
+            H.a ! A.href "/rundata" $ "All"
             H.a ! A.href "/chart/mpw" $ "Charts"
+            H.a ! A.href "/monthly" $ "Monthly"
 
 landingPageHtml :: Maybe User -> H.Html
 landingPageHtml muser =

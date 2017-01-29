@@ -28,7 +28,6 @@ library
   build-depends: bytestring
   build-depends: cassava
   build-depends: containers
---  build-depends: happstack
   build-depends: happstack-server
   build-depends: http-client
   build-depends: http-conduit
@@ -43,7 +42,6 @@ library
   build-depends: transformers
   build-depends: unordered-containers
   build-depends: vector
---  build-depends: wreq
 
 executable WorkoutsMain
   hs-source-dirs: exec
