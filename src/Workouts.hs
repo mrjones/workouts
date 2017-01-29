@@ -21,6 +21,7 @@ import Control.Monad.Trans.Maybe (MaybeT(..), runMaybeT)
 import qualified Data.Aeson as J ((.:), Value)
 import Data.Aeson hiding (decode, Series)
 import qualified Data.Aeson as JSON (decode, FromJSON(..), Object(..))
+import Data.Aeson.Types (emptyObject)
 import Data.Aeson.Lens (key, _String, values)
 import qualified Data.ByteString.Char8 as C8 (pack,unpack,ByteString,length,append)
 import qualified Data.ByteString.Lazy.Char8 as C8L (ByteString, fromStrict, pack, putStrLn, unpack)
@@ -30,7 +31,7 @@ import qualified Data.ByteString.Base64 as BS64 (decode, decodeLenient)
 import qualified Data.Csv as CSV (decodeByName, FromNamedRecord(..), (.:), Parser(..), NamedRecord(..))
 import Data.Char (toLower)
 import Data.Int (Int64)
-import qualified Data.HashMap.Lazy (lookup)
+import qualified Data.HashMap.Lazy (lookupDefault)
 import qualified Data.HashMap.Strict as HM (HashMap(..), keys, lookup)
 import Data.List (reverse, sort, findIndex, zip5, intersperse, concat, sortBy)
 import qualified Data.Map
@@ -430,21 +431,17 @@ decodeToString :: Text.Text -> String
 decodeToString inTxt =
   Text.unpack (TextEnc.decodeUtf8 (BS64.decodeLenient (TextEnc.encodeUtf8 inTxt)))
 
-extractTokenFromResponse :: J.Value -> String
+extractTokenFromResponse :: J.Value -> Maybe String
 extractTokenFromResponse responseJson =
-  -- TODO(mrjones): yuck
-  case (fromJSON responseJson) :: Result Object of
-    Success obj ->
-      case (Data.HashMap.Lazy.lookup "id_token" obj) of
-        Just tokenValue ->
-          case (fromJSON tokenValue) :: Result String of
-            Success tokenStr -> tokenStr
-            Error s -> "damn2: " ++ s
-        Nothing -> "damn no access token"
-    Error s -> "damn: " ++ s
+  let tokenResult = do
+        obj <- (fromJSON responseJson) :: Result Object
+        tokenValue <- return $ Data.HashMap.Lazy.lookupDefault emptyObject "id_token" obj
+        fromJSON tokenValue :: Result String
+  in case tokenResult of
+       Success t -> Just t
+       Error _ -> Nothing -- TODO: return/print the error
 
-
-getGoogleJWTToken  :: String -> String -> String -> String -> IO (String)
+getGoogleJWTToken  :: String -> String -> String -> String -> IO (Maybe String)
 getGoogleJWTToken clientid secret code redirectUrl =
   do
     let request =
@@ -461,16 +458,15 @@ getGoogleJWTToken clientid secret code redirectUrl =
 
 getGoogleId :: String -> String -> String -> String -> IO (Maybe Identity)
 getGoogleId clientid secret code redirectUrl = do
-  idToken <- getGoogleJWTToken clientid secret code redirectUrl
-  putStrLn idToken
-  encodedToken <- return $ Text.pack idToken
-  encodedParts <- return $ Text.splitOn "." encodedToken
-  -- TODO(mrjones): verify the signature with the algorithm named in
-  -- the header
-  jwtPayload <- return $ (jwtDecode (head (tail encodedParts)) :: Maybe JWTPayload)
-  return $ case jwtPayload of
-    Nothing -> Nothing
-    Just payload -> Just (Identity (email payload) (sub payload) Google)
+  maybeIdToken <- getGoogleJWTToken clientid secret code redirectUrl
+  return $ do
+    idToken <- (maybeIdToken :: Maybe String)
+    encodedToken <- return $ Text.pack idToken
+    encodedParts <- return $ Text.splitOn "." encodedToken
+    -- TODO(mrjones): verify the signature with the algorithm named in
+    -- the header
+    payload <- (jwtDecode (head (tail encodedParts)) :: Maybe JWTPayload)
+    return (Identity (email payload) (sub payload) Google)
 
 findOrInsertGoogleUser :: Connection -> String -> String -> IO (Maybe User)
 findOrInsertGoogleUser conn email sub = do
