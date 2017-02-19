@@ -1,9 +1,11 @@
 usage="$0 [tag]"
 project="mrjones/workouts"
+imageName="gcr.io/mrjones-gke/workouts"
 
 if [ -z $1 ]
 then
     echo "Please supply a tag for this image"
+    echo "Run 'gcloud docker images' to see existing images / tags"
     echo $usage
     exit 1
 fi
@@ -20,13 +22,13 @@ cabal install
 
 echo "=== Creating image"
 docker build -t $project:$tag .
-docker tag $project:$tag gcr.io/mrjones-gke/workouts:${tag}
+docker tag $project:$tag ${imageName}:${tag}
 
 if [[ $push == "true" ]]
 then
     echo "=== Pushing to docker hub"
-    gcloud docker push gcr.io/mrjones-gke/workouts:${tag}
+    gcloud docker push ${imageName}:${tag}
 
-else 
+else
     echo "=== Skipping push to docker hub"
 fi
