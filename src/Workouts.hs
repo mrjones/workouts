@@ -283,7 +283,7 @@ maybeFindUserWithId conn mId = runMaybeT $ do
 
 monthlyPage :: Connection -> User -> ServerPartT IO Response
 monthlyPage conn user = do
-  monthlyData <- liftIO $ query conn "SELECT YEAR(date) AS year, MONTH(date) AS month, SUM(miles) FROM happstack.runs WHERE user_id = (?) GROUP BY year, month ORDER BY year ASC, month DESC" [(userId user)]
+  monthlyData <- liftIO $ query conn "SELECT YEAR(date) AS year, MONTH(date) AS month, SUM(miles) FROM happstack.runs WHERE user_id = (?) GROUP BY year, month ORDER BY year DESC, month DESC" [(userId user)]
   ok $ toResponse $ monthlyDataHtml monthlyData user
 
 peekUser :: Connection -> User -> Maybe String -> IO User
