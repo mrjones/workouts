@@ -45,6 +45,8 @@ data WorkoutConf = WorkoutConf { wcGoogleClientId :: String
                                , wcAdminId :: String
                                , wcPort :: Int
                                , wcMysqlHost :: String
+                               , wcMysqlUser :: String
+                               , wcMysqlPassword :: String
                                , wcStaticDir :: String
                                } deriving (Show)
 
@@ -124,7 +126,7 @@ allPages wc =
 
 databasePages :: WorkoutConf -> String -> UTCTime -> ServerPartT IO Response
 databasePages wc redirectUrl requestStart = do
-  conn <- liftIO $ dbConnect (wcMysqlHost wc)
+  conn <- liftIO $ dbConnect (wcMysqlHost wc) (wcMysqlUser wc) (wcMysqlPassword wc)
   msum [ dir "admin" $ dir "mkdb" $ mkDbPage conn
        , loggedInPages conn (wcAdminKind wc) (wcAdminId wc) requestStart
        , dir "handlelogin" $ handleLoginPage conn (wcGoogleClientId wc) (wcGoogleClientSecret wc) redirectUrl
@@ -551,12 +553,12 @@ storeRun conn mrun mkind = fromMaybe (return 0) $ do
 -- Database logic
 --
 
-dbConnect :: String -> IO Connection
-dbConnect hostname = do
+dbConnect :: String -> String -> String -> IO Connection
+dbConnect hostname user password = do
   start <- getCurrentTime
   conn <- connect defaultConnectInfo
-    { connectUser = "happstack"
-    , connectPassword = "happstack"
+    { connectUser = user
+    , connectPassword = password
     , connectDatabase = "happstack"
     , connectHost = hostname
     }

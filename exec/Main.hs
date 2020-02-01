@@ -11,6 +11,8 @@ data Flag = GoogleClientIdFlag String
           | AdminIdFlag String
           | PortFlag Int
           | MySqlHostFlag String
+          | MySqlUsernameFlag String
+          | MySqlPasswordFlag String
           | StaticDirFlag String
           deriving (Show)
 
@@ -22,6 +24,8 @@ flagDefs =
   , Option ['u'] ["admin_id"] (ReqArg AdminIdFlag "ID") "OpenID user id for the admin user."
   , Option ['p'] ["port"] (ReqArg parsePortFlag "PORT") "HTTP Port"
   , Option ['m'] ["mysql_host"] (ReqArg MySqlHostFlag "HOST") "MySQL hostname"
+  , Option [] ["mysql_username"] (ReqArg MySqlUsernameFlag "USER") "MySQL username"
+  , Option [] ["mysql_password"] (ReqArg MySqlPasswordFlag "PW") "MySQL password"
   , Option ['d'] ["static_dir"] (ReqArg StaticDirFlag "DIR") "Static files root directory"
   ]
 
@@ -29,7 +33,7 @@ parsePortFlag :: String -> Flag
 parsePortFlag ps = PortFlag $ fromMaybe 8000 $ readMaybe ps
 
 argvToFlags :: [String] -> IO [Flag]
-argvToFlags argv = 
+argvToFlags argv =
   case getOpt Permute flagDefs argv of
     (f,_,[]  ) -> return f
     (_,_,errs) -> ioError (userError (concat errs ++ usageInfo header flagDefs))
@@ -44,11 +48,13 @@ flagsToConfig fs =
             AdminIdFlag i -> c { wcAdminId = i }
             PortFlag p -> c { wcPort = p }
             MySqlHostFlag h -> c { wcMysqlHost = h }
+            MySqlUsernameFlag u -> c { wcMysqlUser = u }
+            MySqlPasswordFlag p -> c { wcMysqlPassword = p }
             StaticDirFlag d -> c { wcStaticDir = d }
         ) defaultConfig fs
 
 defaultConfig :: WorkoutConf
-defaultConfig = WorkoutConf "" "" "google" "" 8000 "localhost" "static"
+defaultConfig = WorkoutConf "" "" "google" "" 8000 "localhost" "happstack" "happstack" "static"
 
 
 main:: IO()

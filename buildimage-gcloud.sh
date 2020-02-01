@@ -27,7 +27,7 @@ docker tag $project:$tag ${imageName}:${tag}
 if [[ $push == "true" ]]
 then
     echo "=== Pushing to docker hub"
-    gcloud docker push ${imageName}:${tag}
+    gcloud docker -- push ${imageName}:${tag}
 
 else
     echo "=== Skipping push to docker hub"
