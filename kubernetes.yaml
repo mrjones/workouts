@@ -1,10 +1,13 @@
 # gcloud container clusters get-credentials cluster-1 --zone us-central1-f --project mrjones-gke
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workouts
 spec:
   replicas: 2
+  selector:
+    matchLabels:
+      run: workouts
   template:
     metadata:
       labels:
@@ -12,7 +15,7 @@ spec:
     spec:
       containers:
       - name: workouts
-        image: gcr.io/mrjones-gke/workouts:2018-01-13.0
+        image: gcr.io/mrjones-gke/workouts:2020-06-13.6
         imagePullPolicy: IfNotPresent
         env:
         - name: GOOGLE_CLIENT_ID

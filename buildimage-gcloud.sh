@@ -18,7 +18,7 @@ then
 fi
 
 echo "=== Compiling binary"
-cabal install
+cabal build
 
 echo "=== Creating image"
 docker build -t $project:$tag .
@@ -32,3 +32,4 @@ then
 else
     echo "=== Skipping push to docker hub"
 fi
+a
