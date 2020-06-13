@@ -18,6 +18,7 @@ import Data.Int (Int64)
 import qualified Data.HashMap.Lazy (lookupDefault)
 import Data.List (sort, findIndex, zip5, intersperse, sortBy)
 import Data.Maybe (fromJust, fromMaybe)
+import Data.String (fromString)
 import qualified Data.Text as Text (splitOn, pack, unpack, Text)
 import qualified Data.Text.Encoding as TextEnc (encodeUtf8)
 import Data.Time.Calendar (Day, fromGregorianValid, fromGregorian, diffDays)
@@ -285,7 +286,9 @@ maybeFindUserWithId conn mId = runMaybeT $ do
 
 monthlyPage :: Connection -> User -> ServerPartT IO Response
 monthlyPage conn user = do
-  monthlyData <- liftIO $ query conn "SELECT YEAR(date) AS year, MONTH(date) AS month, SUM(miles) FROM happstack.runs WHERE user_id = (?) GROUP BY year, month ORDER BY year DESC, month DESC" [(userId user)]
+  mSortBy <- optional $ look "sort_by"
+  orderBySql <- return $ if mSortBy == Just "miles" then ("miles DESC" :: String) else ("year DESC, month DESC" :: String)
+  monthlyData <- liftIO $ query conn ((fromString ("SELECT YEAR(date) AS year, MONTH(date) AS month, SUM(miles) as miles FROM happstack.runs WHERE user_id = (?) GROUP BY year, month ORDER BY " ++ orderBySql)) :: Query) [(userId user)]
   ok $ toResponse $ monthlyDataHtml monthlyData user
 
 peekUser :: Connection -> User -> Maybe String -> IO User
@@ -876,9 +879,9 @@ monthlyDataHtml monthlyDataPoints user =
     headHtml "Monthly Summary"
     H.body $ do
       headerBarHtml user user
-      H.table $ do
+      H.table ! A.class_ "datatable" ! A.style "width: auto" $ do
         H.tr $ do
-          H.td $ "Year"
-          H.td $ "Month"
-          H.td $ "Miles"
+          H.th $ "Year"
+          H.th $ H.a ! A.href "/monthly" $ "Month"
+          H.th $ H.a ! A.href "/monthly?sort_by=miles" $ "Miles"
         mapM_ monthlyDataRow monthlyDataPoints
